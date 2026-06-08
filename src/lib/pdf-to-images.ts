@@ -25,7 +25,11 @@ export async function pdfToImages(
     canvas.height = Math.ceil(viewport.height);
     const ctx = canvas.getContext("2d");
     if (!ctx) continue;
-    await page.render({ canvasContext: ctx, viewport, canvas }).promise;
+    await page.render({
+      canvasContext: ctx,
+      viewport,
+      canvas,
+    } as Parameters<typeof page.render>[0]).promise;
     images.push(canvas.toDataURL("image/jpeg", quality));
   }
 
