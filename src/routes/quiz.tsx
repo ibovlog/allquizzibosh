@@ -1,8 +1,10 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { CheckCircle2, Trophy, ArrowLeft, ArrowRight, Loader2 } from "lucide-react";
+import { CheckCircle2, Trophy, ArrowLeft, ArrowRight, Loader2, Bell } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
+import { supabase } from "@/integrations/supabase/client";
 import {
   fetchQuestions,
   submitResult,
@@ -15,7 +17,15 @@ export const Route = createFileRoute("/quiz")({
   component: QuizPage,
 });
 
-type Config = { seat: number; count: number; order: "sequential" | "random" };
+type Config = {
+  assessmentId: string;
+  assessmentName: string;
+  seat: number;
+  count: number;
+  order: "sequential" | "random";
+};
+
+type Msg = { id: string; body: string; kind: string; created_at: string };
 
 function QuizPage() {
   const navigate = useNavigate();
@@ -26,6 +36,7 @@ function QuizPage() {
   const [answers, setAnswers] = useState<Record<number, number>>({});
   const [finished, setFinished] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [messages, setMessages] = useState<Msg[]>([]);
 
   useEffect(() => {
     const raw = sessionStorage.getItem("quizConfig");
@@ -35,7 +46,7 @@ function QuizPage() {
     }
     const cfg = JSON.parse(raw) as Config;
     setConfig(cfg);
-    fetchQuestions()
+    fetchQuestions(cfg.assessmentId)
       .then((all) => {
         if (all.length === 0) {
           setLoadError("Hələ heç bir sual yüklənməyib. Admin PDF yükləməlidir.");
@@ -47,6 +58,37 @@ function QuizPage() {
       })
       .catch(() => setLoadError("Suallar yüklənərkən xəta baş verdi."));
   }, [navigate]);
+
+  // Realtime admin messages targeted to this assessment + seat (or broadcast).
+  useEffect(() => {
+    if (!config) return;
+    const channel = supabase
+      .channel(`messages-${config.assessmentId}-${config.seat}`)
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "admin_messages" },
+        (payload) => {
+          const m = payload.new as {
+            id: string;
+            body: string;
+            kind: string;
+            created_at: string;
+            assessment_id: string | null;
+            seat_number: number | null;
+          };
+          const forAssessment = m.assessment_id === null || m.assessment_id === config.assessmentId;
+          const forSeat = m.seat_number === null || m.seat_number === config.seat;
+          if (!forAssessment || !forSeat) return;
+          setMessages((prev) => [{ id: m.id, body: m.body, kind: m.kind, created_at: m.created_at }, ...prev]);
+          if (m.kind === "warning") toast.warning(m.body);
+          else toast.info(m.body);
+        },
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [config]);
 
   const score = useMemo(() => {
     if (!questions) return 0;
@@ -61,6 +103,7 @@ function QuizPage() {
     setSaving(true);
     try {
       await submitResult({
+        assessment_id: config.assessmentId,
         seat_number: config.seat,
         score,
         total: questions.length,
@@ -105,7 +148,7 @@ function QuizPage() {
           </div>
           <h2 className="mt-5 text-2xl font-bold text-foreground">Test bitdi!</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Sıra nömrəsi: {config.seat}
+            {config.assessmentName} · Sıra nömrəsi: {config.seat}
           </p>
           <div className="mt-6 text-5xl font-bold text-primary">
             {score}
@@ -131,8 +174,24 @@ function QuizPage() {
   return (
     <main className="min-h-screen bg-background">
       <div className="mx-auto max-w-2xl px-4 py-8">
+        {messages.length > 0 && (
+          <div
+            className={cn(
+              "mb-5 flex items-start gap-3 rounded-2xl border p-4 text-sm",
+              messages[0].kind === "warning"
+                ? "border-destructive/40 bg-destructive/10 text-destructive"
+                : "border-primary/40 bg-primary/10 text-foreground",
+            )}
+          >
+            <Bell className="mt-0.5 h-4 w-4 shrink-0" />
+            <div>
+              <p className="font-semibold">Admindən ismarıc</p>
+              <p className="mt-0.5">{messages[0].body}</p>
+            </div>
+          </div>
+        )}
         <div className="mb-6 flex items-center justify-between text-sm font-medium text-muted-foreground">
-          <span>Sıra #{config.seat}</span>
+          <span>{config.assessmentName} · Sıra #{config.seat}</span>
           <span>
             Sual {current + 1} / {questions.length}
           </span>
@@ -185,6 +244,29 @@ function QuizPage() {
               );
             })}
           </div>
+        </div>
+
+        <div className="mt-6 grid grid-cols-8 gap-2 sm:grid-cols-10">
+          {questions.map((_, i) => {
+            const isCurrent = i === current;
+            const answered = answers[i] !== undefined;
+            return (
+              <button
+                key={i}
+                onClick={() => setCurrent(i)}
+                className={cn(
+                  "flex h-10 items-center justify-center rounded-xl border text-sm font-semibold transition-all",
+                  isCurrent
+                    ? "border-primary bg-primary text-primary-foreground shadow-md"
+                    : answered
+                      ? "border-primary/40 bg-primary/10 text-primary"
+                      : "border-border bg-card text-muted-foreground hover:border-primary/40",
+                )}
+              >
+                {i + 1}
+              </button>
+            );
+          })}
         </div>
 
         <div className="mt-6 flex items-center justify-between gap-3">
