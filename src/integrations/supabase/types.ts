@@ -14,8 +14,115 @@ export type Database = {
   }
   public: {
     Tables: {
+      admin_messages: {
+        Row: {
+          assessment_id: string | null
+          body: string
+          created_at: string
+          id: string
+          kind: string
+          seat_number: number | null
+        }
+        Insert: {
+          assessment_id?: string | null
+          body: string
+          created_at?: string
+          id?: string
+          kind?: string
+          seat_number?: number | null
+        }
+        Update: {
+          assessment_id?: string | null
+          body?: string
+          created_at?: string
+          id?: string
+          kind?: string
+          seat_number?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "admin_messages_assessment_id_fkey"
+            columns: ["assessment_id"]
+            isOneToOne: false
+            referencedRelation: "assessments"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      assessments: {
+        Row: {
+          created_at: string
+          description: string | null
+          id: string
+          is_open: boolean
+          name: string
+          order_mode: string
+          question_count: number
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_open?: boolean
+          name: string
+          order_mode?: string
+          question_count?: number
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_open?: boolean
+          name?: string
+          order_mode?: string
+          question_count?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      participants: {
+        Row: {
+          assessment_id: string
+          blocked: boolean
+          created_at: string
+          device_id: string | null
+          id: string
+          seat_number: number
+          updated_at: string
+        }
+        Insert: {
+          assessment_id: string
+          blocked?: boolean
+          created_at?: string
+          device_id?: string | null
+          id?: string
+          seat_number: number
+          updated_at?: string
+        }
+        Update: {
+          assessment_id?: string
+          blocked?: boolean
+          created_at?: string
+          device_id?: string | null
+          id?: string
+          seat_number?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "participants_assessment_id_fkey"
+            columns: ["assessment_id"]
+            isOneToOne: false
+            referencedRelation: "assessments"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       questions: {
         Row: {
+          assessment_id: string
           correct_index: number
           created_at: string
           id: string
@@ -24,6 +131,7 @@ export type Database = {
           prompt: string
         }
         Insert: {
+          assessment_id: string
           correct_index?: number
           created_at?: string
           id?: string
@@ -32,6 +140,7 @@ export type Database = {
           prompt: string
         }
         Update: {
+          assessment_id?: string
           correct_index?: number
           created_at?: string
           id?: string
@@ -39,10 +148,19 @@ export type Database = {
           position?: number
           prompt?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "questions_assessment_id_fkey"
+            columns: ["assessment_id"]
+            isOneToOne: false
+            referencedRelation: "assessments"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       quiz_results: {
         Row: {
+          assessment_id: string | null
           created_at: string
           id: string
           score: number
@@ -50,6 +168,7 @@ export type Database = {
           total: number
         }
         Insert: {
+          assessment_id?: string | null
           created_at?: string
           id?: string
           score: number
@@ -57,13 +176,22 @@ export type Database = {
           total: number
         }
         Update: {
+          assessment_id?: string | null
           created_at?: string
           id?: string
           score?: number
           seat_number?: number
           total?: number
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "quiz_results_assessment_id_fkey"
+            columns: ["assessment_id"]
+            isOneToOne: false
+            referencedRelation: "assessments"
+            referencedColumns: ["id"]
+          },
+        ]
       }
     }
     Views: {
