@@ -108,7 +108,13 @@ export const updateAssessment = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     if (!checkPassword(data.password)) throw new Error("UNAUTHORIZED");
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const patch: Record<string, unknown> = {};
+    const patch: {
+      name?: string;
+      description?: string | null;
+      question_count?: number;
+      order_mode?: string;
+      is_open?: boolean;
+    } = {};
     if (data.name !== undefined) patch.name = data.name;
     if (data.description !== undefined) patch.description = data.description || null;
     if (data.question_count !== undefined) patch.question_count = data.question_count;
@@ -270,7 +276,10 @@ export const resetParticipant = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     if (!checkPassword(data.password)) throw new Error("UNAUTHORIZED");
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const patch: Record<string, unknown> = { device_id: null, blocked: false };
+    const patch: { device_id: null; blocked: boolean; seat_number?: number } = {
+      device_id: null,
+      blocked: false,
+    };
     if (data.new_seat !== undefined) patch.seat_number = data.new_seat;
     const { error } = await supabaseAdmin.from("participants").update(patch).eq("id", data.id);
     if (error) {
