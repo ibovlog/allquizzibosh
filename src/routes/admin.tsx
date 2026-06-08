@@ -74,6 +74,10 @@ function AdminPage() {
   }
 
   async function doLogin() {
+    if (!password.trim()) {
+      toast.error("Zəhmət olmasa parolu daxil edin.");
+      return;
+    }
     setLoggingIn(true);
     try {
       const res = await login({ data: { password } });
