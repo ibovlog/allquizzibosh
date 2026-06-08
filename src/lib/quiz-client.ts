@@ -8,10 +8,11 @@ export type QuizQuestion = {
   position: number;
 };
 
-export async function fetchQuestions(): Promise<QuizQuestion[]> {
+export async function fetchQuestions(assessmentId: string): Promise<QuizQuestion[]> {
   const { data, error } = await supabase
     .from("questions")
     .select("id, prompt, options, correct_index, position")
+    .eq("assessment_id", assessmentId)
     .order("position", { ascending: true });
   if (error) throw error;
   return (data ?? []).map((q) => ({
@@ -20,21 +21,28 @@ export async function fetchQuestions(): Promise<QuizQuestion[]> {
   }));
 }
 
-export async function countQuestions(): Promise<number> {
-  const { count, error } = await supabase
-    .from("questions")
-    .select("id", { count: "exact", head: true });
-  if (error) throw error;
-  return count ?? 0;
-}
-
 export async function submitResult(input: {
+  assessment_id: string;
   seat_number: number;
   score: number;
   total: number;
 }): Promise<void> {
   const { error } = await supabase.from("quiz_results").insert(input);
   if (error) throw error;
+}
+
+// Stable per-device identifier kept in localStorage.
+export function getDeviceId(): string {
+  const KEY = "quizDeviceId";
+  let id = localStorage.getItem(KEY);
+  if (!id) {
+    id =
+      (crypto.randomUUID?.() ?? `dev-${Date.now()}-${Math.random().toString(36).slice(2)}`) +
+      "-" +
+      Math.random().toString(36).slice(2, 8);
+    localStorage.setItem(KEY, id);
+  }
+  return id;
 }
 
 export function shuffle<T>(arr: T[]): T[] {
