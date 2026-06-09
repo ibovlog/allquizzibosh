@@ -20,7 +20,8 @@ import {
   createAccessKeys, setAccessKeyBlocked, resetAccessKey, deleteAccessKey,
   resolveProcessingError, deleteProcessingError,
 } from "@/lib/quiz.functions";
-import { pdfToImages, docxToText } from "@/lib/quiz-client";
+import { docxToText } from "@/lib/quiz-client";
+import { pdfToImages } from "@/lib/pdf-to-images";
 
 export const Route = createFileRoute("/admin")({
   head: () => ({ meta: [{ title: "Admin — AI Quiz" }] }),
