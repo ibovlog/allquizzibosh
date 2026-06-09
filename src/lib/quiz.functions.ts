@@ -144,7 +144,7 @@ export const updateAssessment = createServerFn({ method: "POST" })
     if (data.seat_max !== undefined) patch.seat_max = data.seat_max;
     if (data.resume_after_unblock !== undefined) patch.resume_after_unblock = data.resume_after_unblock;
     if (data.is_open !== undefined) patch.is_open = data.is_open;
-    const { error } = await supabaseAdmin.from("assessments").update(patch).eq("id", data.id);
+    const { error } = await supabaseAdmin.from("assessments").update(patch as never).eq("id", data.id);
     if (error) throw new Error(error.message);
     return { ok: true };
   });
@@ -189,7 +189,7 @@ export const saveQuestion = createServerFn({ method: "POST" })
         correct_index: correct,
       };
       if (data.pdf_number !== undefined) patch.pdf_number = data.pdf_number;
-      const { error } = await supabaseAdmin.from("questions").update(patch).eq("id", data.id);
+      const { error } = await supabaseAdmin.from("questions").update(patch as never).eq("id", data.id);
       if (error) throw new Error(error.message);
       return { ok: true };
     }
@@ -293,7 +293,7 @@ export const setParticipantBlocked = createServerFn({ method: "POST" })
       patch.current_index = 0;
       patch.answers = {};
     }
-    const { error } = await supabaseAdmin.from("participants").update(patch).eq("id", data.id);
+    const { error } = await supabaseAdmin.from("participants").update(patch as never).eq("id", data.id);
     if (error) throw new Error(error.message);
     return { ok: true };
   });
@@ -318,7 +318,7 @@ export const resetParticipant = createServerFn({ method: "POST" })
       answers: {},
     };
     if (data.new_seat !== undefined) patch.seat_number = data.new_seat;
-    const { error } = await supabaseAdmin.from("participants").update(patch).eq("id", data.id);
+    const { error } = await supabaseAdmin.from("participants").update(patch as never).eq("id", data.id);
     if (error) {
       if (error.code === "23505") throw new Error("Bu sıra nömrəsi artıq mövcuddur.");
       throw new Error(error.message);
@@ -397,7 +397,7 @@ export const setAccessKeyBlocked = createServerFn({ method: "POST" })
       patch.current_index = 0;
       patch.answers = {};
     }
-    const { error } = await supabaseAdmin.from("access_keys").update(patch).eq("id", data.id);
+    const { error } = await supabaseAdmin.from("access_keys").update(patch as never).eq("id", data.id);
     if (error) throw new Error(error.message);
     return { ok: true };
   });
@@ -603,10 +603,10 @@ export const saveProgress = createServerFn({ method: "POST" })
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const patch = { current_index: data.current_index, answers: data.answers };
     if (data.participant_id) {
-      await supabaseAdmin.from("participants").update(patch).eq("id", data.participant_id);
+      await supabaseAdmin.from("participants").update(patch as never).eq("id", data.participant_id);
     }
     if (data.access_key_id) {
-      await supabaseAdmin.from("access_keys").update(patch).eq("id", data.access_key_id);
+      await supabaseAdmin.from("access_keys").update(patch as never).eq("id", data.access_key_id);
     }
     return { ok: true };
   });
