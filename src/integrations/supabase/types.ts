@@ -14,6 +14,47 @@ export type Database = {
   }
   public: {
     Tables: {
+      access_keys: {
+        Row: {
+          answers: Json
+          assessment_id: string
+          blocked: boolean
+          created_at: string
+          current_index: number
+          device_id: string | null
+          id: string
+          key_code: string
+        }
+        Insert: {
+          answers?: Json
+          assessment_id: string
+          blocked?: boolean
+          created_at?: string
+          current_index?: number
+          device_id?: string | null
+          id?: string
+          key_code: string
+        }
+        Update: {
+          answers?: Json
+          assessment_id?: string
+          blocked?: boolean
+          created_at?: string
+          current_index?: number
+          device_id?: string | null
+          id?: string
+          key_code?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "access_keys_assessment_id_fkey"
+            columns: ["assessment_id"]
+            isOneToOne: false
+            referencedRelation: "assessments"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       admin_messages: {
         Row: {
           assessment_id: string | null
@@ -55,9 +96,13 @@ export type Database = {
           description: string | null
           id: string
           is_open: boolean
+          login_mode: string
           name: string
           order_mode: string
           question_count: number
+          resume_after_unblock: boolean
+          seat_max: number
+          seat_min: number
           updated_at: string
         }
         Insert: {
@@ -65,9 +110,13 @@ export type Database = {
           description?: string | null
           id?: string
           is_open?: boolean
+          login_mode?: string
           name: string
           order_mode?: string
           question_count?: number
+          resume_after_unblock?: boolean
+          seat_max?: number
+          seat_min?: number
           updated_at?: string
         }
         Update: {
@@ -75,36 +124,49 @@ export type Database = {
           description?: string | null
           id?: string
           is_open?: boolean
+          login_mode?: string
           name?: string
           order_mode?: string
           question_count?: number
+          resume_after_unblock?: boolean
+          seat_max?: number
+          seat_min?: number
           updated_at?: string
         }
         Relationships: []
       }
       participants: {
         Row: {
+          access_key: string | null
+          answers: Json
           assessment_id: string
           blocked: boolean
           created_at: string
+          current_index: number
           device_id: string | null
           id: string
           seat_number: number
           updated_at: string
         }
         Insert: {
+          access_key?: string | null
+          answers?: Json
           assessment_id: string
           blocked?: boolean
           created_at?: string
+          current_index?: number
           device_id?: string | null
           id?: string
           seat_number: number
           updated_at?: string
         }
         Update: {
+          access_key?: string | null
+          answers?: Json
           assessment_id?: string
           blocked?: boolean
           created_at?: string
+          current_index?: number
           device_id?: string | null
           id?: string
           seat_number?: number
@@ -120,6 +182,57 @@ export type Database = {
           },
         ]
       }
+      processing_errors: {
+        Row: {
+          assessment_id: string | null
+          created_at: string
+          file_name: string | null
+          id: string
+          question_id: string | null
+          question_number: number | null
+          raw_excerpt: string | null
+          reason: string
+          status: string
+        }
+        Insert: {
+          assessment_id?: string | null
+          created_at?: string
+          file_name?: string | null
+          id?: string
+          question_id?: string | null
+          question_number?: number | null
+          raw_excerpt?: string | null
+          reason: string
+          status?: string
+        }
+        Update: {
+          assessment_id?: string | null
+          created_at?: string
+          file_name?: string | null
+          id?: string
+          question_id?: string | null
+          question_number?: number | null
+          raw_excerpt?: string | null
+          reason?: string
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "processing_errors_assessment_id_fkey"
+            columns: ["assessment_id"]
+            isOneToOne: false
+            referencedRelation: "assessments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "processing_errors_question_id_fkey"
+            columns: ["question_id"]
+            isOneToOne: false
+            referencedRelation: "questions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       questions: {
         Row: {
           assessment_id: string
@@ -127,8 +240,10 @@ export type Database = {
           created_at: string
           id: string
           options: Json
+          pdf_number: number | null
           position: number
           prompt: string
+          source_file: string | null
         }
         Insert: {
           assessment_id: string
@@ -136,8 +251,10 @@ export type Database = {
           created_at?: string
           id?: string
           options?: Json
+          pdf_number?: number | null
           position?: number
           prompt: string
+          source_file?: string | null
         }
         Update: {
           assessment_id?: string
@@ -145,8 +262,10 @@ export type Database = {
           created_at?: string
           id?: string
           options?: Json
+          pdf_number?: number | null
           position?: number
           prompt?: string
+          source_file?: string | null
         }
         Relationships: [
           {
@@ -162,6 +281,7 @@ export type Database = {
         Row: {
           assessment_id: string | null
           created_at: string
+          details: Json | null
           id: string
           score: number
           seat_number: number
@@ -170,6 +290,7 @@ export type Database = {
         Insert: {
           assessment_id?: string | null
           created_at?: string
+          details?: Json | null
           id?: string
           score: number
           seat_number: number
@@ -178,6 +299,7 @@ export type Database = {
         Update: {
           assessment_id?: string | null
           created_at?: string
+          details?: Json | null
           id?: string
           score?: number
           seat_number?: number
