@@ -1,80 +1,100 @@
 ## Məqsəd
 
-Mövcud tək-quiz sistemini çoxlu **assessment** (test paketi) dəstəkləyən platformaya çeviririk. Admin bir neçə assessment yaradır, hər birinə ad verir. İstifadəçi **assessment adı + sıra nömrəsi** daxil edərək uyğun quizə girir.
+Mövcud quiz platformasını aşağıdakı 10 tələblə tam yeniləyirik. Dəyişikliklər verilənlər bazası, server funksiyaları və həm admin, həm istifadəçi interfeysinə toxunur.
 
-Əlavə imkanlar:
-1. Admin → istifadəçilərə **anlıq mesaj/xəbərdarlıq** (realtime, dərhal ekranda görünür).
-2. İstifadəçi quiz içində **rəqəmlərə toxunaraq** suallar arası keçid (şəkildəki kimi naviqasiya şəbəkəsi).
-3. Admin sualları **redaktə** edə, **silə**, **yeni əlavə** edə bilsin (həm sonuna, həm istənilən yerə).
-4. **Cihaz kilidi**: hər sıra nömrəsi ilk girişdə cihaza (device id) bağlanır; başqa brauzerdən eyni nömrə ilə girmək olmaz.
-5. Admin → istifadəçini **bloklama / blokdan çıxarma** (ayrı bölmə).
-6. Admin → istifadəçinin girişini **resetləmə** və sıra nömrəsini dəyişmə (səhv nömrə daxil edən üçün).
-
-## Verilənlər bazası (yeni miqrasiya)
+## 1. Verilənlər bazası (yeni miqrasiya)
 
 ```text
-assessments
-  id, name (unique), description, question_count (default), order_mode, is_open, created_at, updated_at
+assessments (mövcud + əlavə)
+  + login_mode text  ('seat' | 'key' | 'both')   default 'seat'
+  + seat_min int, seat_max int                    (sıra aralığı)
+  + resume_after_unblock bool  default true
 
-questions            (mövcud + dəyişiklik)
-  + assessment_id  -> assessments.id  (NOT NULL)
+questions (mövcud + əlavə)
+  + pdf_number int        (PDF/Word-dəki orijinal sual nömrəsi)
+  + source_file text      (yükləndiyi fayl adı)
 
-participants         (yeni — sıra nömrəsi + cihaz kilidi)
-  id, assessment_id, seat_number, device_id, blocked (bool), created_at
-  UNIQUE(assessment_id, seat_number)
+access_keys (yeni)
+  id, assessment_id, key_code (unique per assessment), used_by_device, blocked, created_at
 
-admin_messages       (yeni — realtime ismarıclar)
-  id, assessment_id (nullable=hamıya), seat_number (nullable=hamıya), body, kind (info/warning), created_at
+participants (mövcud + əlavə)
+  + access_key text        (açarla giriş üçün)
+  + current_index int      (qaldığı sual — davam üçün)
+  + answers jsonb          (verilmiş cavablar — davam üçün)
 
-quiz_results         (mövcud + dəyişiklik)
-  + assessment_id
+processing_errors (yeni)
+  id, assessment_id, file_name, question_number, reason, status ('pending'|'resolved'),
+  raw_excerpt text, question_id (nullable), created_at
+
+quiz_results (mövcud + əlavə)
+  + details jsonb   (səhv/doğru cavab hesabatı: prompt, pdf_number, chosen, correct)
 ```
 
-- Bütün cədvəllərə uyğun GRANT + RLS.
-- `participants` və `admin_messages` üçün admin əməliyyatları server funksiyaları (service role) ilə aparılacaq; oxuma istifadəçi üçün məhdud.
-- `admin_messages` üçün Realtime aktivləşdiriləcək (publication).
+Hər yeni public cədvələ GRANT + RLS. `access_keys`, `processing_errors` yalnız server (service role) tərəfindən idarə olunur; oxuma admin server funksiyaları ilə. Realtime: `participants` (bloklama anında tətbiq üçün) və mövcud `admin_messages`.
 
-## Cihaz kilidi məntiqi
+## 2. PDF / Word emalı (maksimum dəqiqlik)
 
-- Brauzerdə `localStorage`-da unikal `deviceId` saxlanılır (yoxdursa yaradılır).
-- İstifadəçi assessment + sıra daxil etdikdə server funksiyası:
-  - Sıra boşdursa → bu device id ilə qeyd edir, icazə verir.
-  - Sıra varsa və device id eynidirsə → icazə.
-  - Sıra varsa və device id fərqlidirsə → rədd ("Bu sıra başqa cihaza bağlıdır").
-  - `blocked = true` → rədd ("Girişiniz bloklanıb").
-- Admin reset → həmin participant-ın `device_id` silinir (yeni cihazdan girə bilər) və ya sıra nömrəsi dəyişilir.
+- Admin PDF **və ya Word** (.docx) yükləyə bilsin.
+- Çoxmərhələli emal: PDF → səhifə şəkilləri (skan üçün OCR), həmçinin mətn təbəqəsi varsa onu da AI-yə ötürürük (mətn + şəkil birgə → daha dəqiq).
+- AI-dən hər sual üçün: `prompt`, `options`, `correct_index`, **`pdf_number`** (mənbədəki orijinal nömrə) tələb olunur.
+- Sual sayı limiti olmadan (10/50/200+) bütün səhifələr partiyalarla (batch) emal olunur, nəticələr birləşdirilir.
+- Yoxlama: variant sayı < 2, düzgün cavab tapılmayıb, prompt boş/natamam, pdf_number yoxdur → sual yenə yaradılır, lakin `processing_errors`-a qeyd düşür (fayl adı, sual nömrəsi, səbəb).
 
-## Realtime mesajlaşma
+## 3. Emal Xətaları bölməsi (admin)
 
-- İstifadəçi quiz səhifəsində öz `assessment_id`+`seat_number`-na uyğun `admin_messages`-ə Supabase Realtime ilə abunə olur.
-- Yeni mesaj gəldikdə ekranda toast + üst banner kimi dərhal göstərilir.
-- Admin paneldə "Mesaj göndər" bölməsi: hədəf (bütün assessment / konkret sıra), mətn, tip (info/xəbərdarlıq).
+- Yeni tab "Emal Xətaları": assessment adı, fayl adı, PDF sual nömrəsi, səbəb, tarix, status.
+- Hər sətirdən: əlaqəli sualı açıb redaktə et, düzgün cavabı təyin et, xətanı "Həll edildi" et (və ya sil).
 
-## Admin panel (yenilənmiş /admin)
+## 4. İstifadəçi: sıralama + sual sayı seçimi
 
-Tablar:
-- **Assessmentlər**: yarat / sil / aç-bağla, ad + sual sayı + ardıcıllıq. PDF yükləmə artıq seçilmiş assessmentə bağlanır.
-- **Suallar**: seçilmiş assessmentin sualları — redaktə (mətn, variantlar, düzgün cavab), sil, yeni əlavə (sona və ya aralığa).
-- **İştirakçılar**: sıra nömrələri siyahısı, blokla/blokdan çıxar, giriş resetlə, sıra dəyiş.
-- **Mesajlar**: realtime ismarıc göndər.
-- **Nəticələr**: assessment üzrə nəticələr.
+- Quizə başlamazdan əvvəl istifadəçi seçir: **Ardıcıl / Qarışıq** və **sual sayı** (assessment-dəki maksimuma qədər).
+- Admin order_mode artıq yalnız standart dəyər; son söz istifadəçinindir.
 
-## İstifadəçi axını (yenilənmiş)
+## 5. Naviqasiyanın yenidən qurulması
 
-- Ana səhifə: **Assessment adı** + **Sıra nömrəsi** soruşulur → server yoxlayır (mövcudluq, cihaz, blok) → quiz açılır.
-- Quiz səhifəsi: sual kartı + altda **rəqəmli naviqasiya şəbəkəsi** (cavablanmış/cari/boş fərqlənir), Əvvəlki/Növbəti, realtime mesaj banneri.
+- "Geri / Növbəti" düymələri birbaşa sual kartının altında.
+- Rəqəmli naviqasiya (1,2,3…) onların altında, mobil üçün uyğun (scroll/grid).
+
+## 6. Giriş modelləri (admin assessment başına seçir)
+
+- **Variant A** — sıra nömrəsi aralığı (seat_min–seat_max).
+- **Variant B** — giriş açarları (admin istənilən qədər açar yaradır, yalnız təsdiqlənmiş açarla giriş).
+- **Variant C** — hər ikisi (sıra + açar tələb olunur).
+- İstifadəçi ana səhifəsi login_mode-a görə müvafiq sahələri göstərir.
+
+## 7. Real-time bloklama
+
+- Admin bloklayan kimi `participants.blocked` → Realtime ilə istifadəçinin quiz səhifəsi dərhal sessiyanı bağlayır (səhifə yeniləməyə ehtiyac yox).
+- Blokdan çıxaranda admin seçir: **qaldığı yerdən davam etsin** (current_index/answers saxlanılır) yoxsa **sıfırdan**.
+
+## 8. Səhv cavabların göstərilməsi
+
+- Test bitəndə hesabat: hər sual üçün mətn, PDF nömrəsi, istifadəçinin cavabı, doğru cavab, doğru/səhv işarəsi.
+- Bu hesabat `quiz_results.details`-ə də yazılır.
+
+## 9. Cihaz bağlama (Device Lock)
+
+- İlk giriş cihaza bağlanır (mövcud device_id məntiqi genişlənir): seat həm də açar həmin cihaza kilidlənir; başqa nömrə/açar/brauzer/cihaz rədd edilir.
+- Admin paneldə: cihaz kilidini sıfırla, istifadəçini yeni cihaza köçür (mövcud reset genişlənir + açar üçün də).
+
+## 10. PDF orijinal sual nömrəsi
+
+- Quiz ekranında: `15 / 200` və altında `PDF #87`.
+- Random rejimdə də pdf_number sabit qalır; nəticələrdə görünür.
+- "Problemi bildir" funksiyasında pdf_number avtomatik əlavə olunur (admin mesajı kimi göndərilir).
+- Admin sual axtarışında pdf_number ilə tapmaq mümkün olsun.
 
 ## Texniki qeydlər
 
-- Bütün admin yazma əməliyyatları `src/lib/quiz.functions.ts` daxilində `ADMIN_PASSWORD` yoxlaması ilə server funksiyaları kimi (service role) qalır.
-- Yeni server funksiyaları: assessment CRUD, participant join/reset/block, question CRUD, message send.
-- Quiz oxuması üçün `quiz-client.ts` assessmentə görə filtrlənəcək; Realtime browser client ilə.
-- `pdf-to-images` + `extractQuiz` dəyişmir, sadəcə `assessment_id` parametri əlavə olunur.
+- Yeni server funksiyaları (`quiz.functions.ts`): Word emalı, batch extract + pdf_number, access key CRUD, processing_errors CRUD, genişlənmiş join (key/seat/both + device lock), unblock-with-resume, save progress, submit with details.
+- `quiz.tsx`: order/count seçim ekranı, yeni naviqasiya, realtime blok dinləyicisi, pdf nömrəsi, bitiş hesabatı.
+- `index.tsx`: login_mode-a görə dinamik giriş forması.
+- Word üçün `.docx` mətn çıxarışı server tərəfdə (mammoth/JSZip kimi worker-uyğun kitabxana), şəkil PDF-lər üçün mövcud `pdf-to-images`.
 
-## Təsdiq sonrası ardıcıllıq
+## Ardıcıllıq
 
-1. Miqrasiya (cədvəllər + RLS + realtime).
-2. Server funksiyaları (assessment, participant, question CRUD, mesaj).
-3. Admin panel UI (tablar).
-4. İstifadəçi ana səhifə + quiz (naviqasiya şəbəkəsi + realtime banner).
-5. Yoxlama (build, əsas axınlar).
+1. Miqrasiya (cədvəllər, sütunlar, GRANT/RLS, realtime).
+2. Server funksiyaları.
+3. Admin UI (giriş modelləri, açarlar, emal xətaları, axtarış, unblock-resume).
+4. İstifadəçi UI (order/count, naviqasiya, realtime blok, pdf nömrəsi, hesabat).
+5. Yoxlama (build + əsas axınlar).

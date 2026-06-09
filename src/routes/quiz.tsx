@@ -1,15 +1,18 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
-import { CheckCircle2, Trophy, ArrowLeft, ArrowRight, Loader2, Bell } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useServerFn } from "@tanstack/react-start";
+import { CheckCircle2, Trophy, ArrowLeft, ArrowRight, Loader2, Bell, Flag, XCircle, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import { saveProgress, checkBlocked, reportProblem } from "@/lib/quiz.functions";
 import {
   fetchQuestions,
   submitResult,
   shuffle,
   type QuizQuestion,
+  type ResultDetail,
 } from "@/lib/quiz-client";
 
 export const Route = createFileRoute("/quiz")({
@@ -20,23 +23,34 @@ export const Route = createFileRoute("/quiz")({
 type Config = {
   assessmentId: string;
   assessmentName: string;
-  seat: number;
+  seat: number | null;
+  accessKey: string | null;
+  participantId: string | null;
+  accessKeyId: string | null;
   count: number;
   order: "sequential" | "random";
+  resumeIndex: number;
+  resumeAnswers: Record<string, number>;
 };
 
 type Msg = { id: string; body: string; kind: string; created_at: string };
 
 function QuizPage() {
   const navigate = useNavigate();
+  const persist = useServerFn(saveProgress);
+  const pollBlocked = useServerFn(checkBlocked);
+  const sendReport = useServerFn(reportProblem);
+
   const [config, setConfig] = useState<Config | null>(null);
   const [questions, setQuestions] = useState<QuizQuestion[] | null>(null);
   const [loadError, setLoadError] = useState("");
   const [current, setCurrent] = useState(0);
-  const [answers, setAnswers] = useState<Record<number, number>>({});
+  const [answers, setAnswers] = useState<Record<string, number>>({});
   const [finished, setFinished] = useState(false);
   const [saving, setSaving] = useState(false);
   const [messages, setMessages] = useState<Msg[]>([]);
+  const [reporting, setReporting] = useState(false);
+  const [reportText, setReportText] = useState("");
 
   useEffect(() => {
     const raw = sessionStorage.getItem("quizConfig");
@@ -46,6 +60,7 @@ function QuizPage() {
     }
     const cfg = JSON.parse(raw) as Config;
     setConfig(cfg);
+    setAnswers(cfg.resumeAnswers ?? {});
     fetchQuestions(cfg.assessmentId)
       .then((all) => {
         if (all.length === 0) {
@@ -53,28 +68,47 @@ function QuizPage() {
           setQuestions([]);
           return;
         }
-        const ordered = cfg.order === "random" ? shuffle(all) : all;
-        setQuestions(ordered.slice(0, Math.min(cfg.count, ordered.length)));
+        // keep a stable order across refreshes
+        const savedOrder = sessionStorage.getItem("quizOrder");
+        let ordered: QuizQuestion[];
+        if (savedOrder) {
+          const ids = JSON.parse(savedOrder) as string[];
+          const byId = new Map(all.map((q) => [q.id, q]));
+          ordered = ids.map((id) => byId.get(id)).filter(Boolean) as QuizQuestion[];
+          if (ordered.length === 0) ordered = all;
+        } else {
+          const base = cfg.order === "random" ? shuffle(all) : all;
+          ordered = base.slice(0, Math.min(cfg.count, base.length));
+          sessionStorage.setItem("quizOrder", JSON.stringify(ordered.map((q) => q.id)));
+        }
+        setQuestions(ordered);
+        setCurrent(Math.min(cfg.resumeIndex ?? 0, Math.max(0, ordered.length - 1)));
       })
       .catch(() => setLoadError("Suallar yüklənərkən xəta baş verdi."));
   }, [navigate]);
 
-  // Realtime admin messages targeted to this assessment + seat (or broadcast).
+  const kick = useCallback(
+    (reason: string) => {
+      toast.error(reason);
+      sessionStorage.removeItem("quizConfig");
+      sessionStorage.removeItem("quizOrder");
+      navigate({ to: "/" });
+    },
+    [navigate],
+  );
+
+  // Realtime: admin messages + instant block via participants table.
   useEffect(() => {
     if (!config) return;
     const channel = supabase
-      .channel(`messages-${config.assessmentId}-${config.seat}`)
+      .channel(`quiz-${config.assessmentId}-${config.seat ?? config.accessKey}`)
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "admin_messages" },
         (payload) => {
           const m = payload.new as {
-            id: string;
-            body: string;
-            kind: string;
-            created_at: string;
-            assessment_id: string | null;
-            seat_number: number | null;
+            id: string; body: string; kind: string; created_at: string;
+            assessment_id: string | null; seat_number: number | null;
           };
           const forAssessment = m.assessment_id === null || m.assessment_id === config.assessmentId;
           const forSeat = m.seat_number === null || m.seat_number === config.seat;
@@ -84,29 +118,82 @@ function QuizPage() {
           else toast.info(m.body);
         },
       )
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "participants" },
+        (payload) => {
+          const p = payload.new as { id: string; blocked: boolean };
+          if (config.participantId && p.id === config.participantId && p.blocked) {
+            kick("Girişiniz admin tərəfindən bloklandı.");
+          }
+        },
+      )
       .subscribe();
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [config]);
+  }, [config, kick]);
+
+  // Polling fallback (covers access-key logins + reliability).
+  useEffect(() => {
+    if (!config || finished) return;
+    if (!config.participantId && !config.accessKeyId) return;
+    const t = setInterval(async () => {
+      try {
+        const res = await pollBlocked({
+          data: { participant_id: config.participantId, access_key_id: config.accessKeyId },
+        });
+        if (res.blocked) kick("Girişiniz admin tərəfindən bloklandı.");
+      } catch {
+        /* ignore */
+      }
+    }, 4000);
+    return () => clearInterval(t);
+  }, [config, finished, pollBlocked, kick]);
+
+  // Save progress (debounced) when answers / position change.
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!config || finished || !questions) return;
+    if (!config.participantId && !config.accessKeyId) return;
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      persist({
+        data: {
+          participant_id: config.participantId,
+          access_key_id: config.accessKeyId,
+          current_index: current,
+          answers,
+        },
+      }).catch(() => {});
+    }, 800);
+    return () => {
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+    };
+  }, [answers, current, config, finished, questions, persist]);
 
   const score = useMemo(() => {
     if (!questions) return 0;
-    return questions.reduce(
-      (acc, q, i) => acc + (answers[i] === q.correct_index ? 1 : 0),
-      0,
-    );
+    return questions.reduce((acc, q) => acc + (answers[q.id] === q.correct_index ? 1 : 0), 0);
   }, [questions, answers]);
 
   async function finish() {
     if (!questions || !config) return;
     setSaving(true);
+    const details: ResultDetail[] = questions.map((q) => ({
+      prompt: q.prompt,
+      pdf_number: q.pdf_number,
+      options: q.options,
+      chosen: answers[q.id] ?? null,
+      correct: q.correct_index,
+    }));
     try {
       await submitResult({
         assessment_id: config.assessmentId,
-        seat_number: config.seat,
+        seat_number: config.seat ?? 0,
         score,
         total: questions.length,
+        details,
       });
     } catch {
       /* ignore save errors for the student */
@@ -115,13 +202,31 @@ function QuizPage() {
     setFinished(true);
   }
 
+  async function submitReport() {
+    if (!config || !questions) return;
+    if (!reportText.trim()) return toast.error("Problemi qısaca yazın.");
+    try {
+      await sendReport({
+        data: {
+          assessment_id: config.assessmentId,
+          seat_number: config.seat,
+          pdf_number: questions[current]?.pdf_number ?? null,
+          body: reportText.trim(),
+        },
+      });
+      toast.success("Bildiriş adminə göndərildi.");
+      setReportText("");
+      setReporting(false);
+    } catch {
+      toast.error("Bildiriş göndərilmədi.");
+    }
+  }
+
   if (loadError) {
     return (
       <Centered>
         <p className="text-center text-base text-muted-foreground">{loadError}</p>
-        <Button onClick={() => navigate({ to: "/" })} className="mt-6 rounded-xl">
-          Geri qayıt
-        </Button>
+        <Button onClick={() => navigate({ to: "/" })} className="mt-6 rounded-xl">Geri qayıt</Button>
       </Centered>
     );
   }
@@ -138,36 +243,81 @@ function QuizPage() {
   if (finished) {
     const pct = Math.round((score / questions.length) * 100);
     return (
-      <Centered>
-        <div
-          className="w-full max-w-md rounded-3xl border border-border bg-card p-8 text-center"
-          style={{ boxShadow: "var(--shadow-card)" }}
-        >
-          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-primary/10 text-primary">
-            <Trophy className="h-8 w-8" />
+      <main className="min-h-screen bg-background">
+        <div className="mx-auto max-w-2xl px-4 py-8">
+          <div className="rounded-3xl border border-border bg-card p-8 text-center" style={{ boxShadow: "var(--shadow-card)" }}>
+            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-primary/10 text-primary">
+              <Trophy className="h-8 w-8" />
+            </div>
+            <h2 className="mt-5 text-2xl font-bold text-foreground">Test bitdi!</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {config.assessmentName}
+              {config.seat ? ` · Sıra nömrəsi: ${config.seat}` : ""}
+            </p>
+            <div className="mt-6 text-5xl font-bold text-primary">
+              {score}
+              <span className="text-2xl text-muted-foreground">/{questions.length}</span>
+            </div>
+            <p className="mt-2 text-sm font-medium text-muted-foreground">{pct}% düzgün</p>
           </div>
-          <h2 className="mt-5 text-2xl font-bold text-foreground">Test bitdi!</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {config.assessmentName} · Sıra nömrəsi: {config.seat}
-          </p>
-          <div className="mt-6 text-5xl font-bold text-primary">
-            {score}
-            <span className="text-2xl text-muted-foreground">/{questions.length}</span>
+
+          <h3 className="mb-3 mt-8 text-lg font-bold text-foreground">Cavab hesabatı</h3>
+          <div className="space-y-3">
+            {questions.map((q, i) => {
+              const chosen = answers[q.id];
+              const ok = chosen === q.correct_index;
+              return (
+                <div key={q.id} className="rounded-2xl border border-border bg-card p-5">
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="font-medium text-foreground">{i + 1}. {q.prompt}</p>
+                    <div className="flex shrink-0 items-center gap-2">
+                      {q.pdf_number != null && (
+                        <span className="rounded-md bg-secondary px-2 py-0.5 text-xs font-semibold text-muted-foreground">PDF #{q.pdf_number}</span>
+                      )}
+                      {ok ? <Check className="h-5 w-5 text-success" /> : <XCircle className="h-5 w-5 text-destructive" />}
+                    </div>
+                  </div>
+                  <div className="mt-3 space-y-2">
+                    {q.options.map((o, oi) => {
+                      const isCorrect = oi === q.correct_index;
+                      const isChosen = oi === chosen;
+                      return (
+                        <div
+                          key={oi}
+                          className={cn(
+                            "rounded-lg border px-3 py-2 text-sm",
+                            isCorrect
+                              ? "border-success/50 bg-success/10 font-medium text-success"
+                              : isChosen
+                                ? "border-destructive/50 bg-destructive/10 text-destructive"
+                                : "border-border text-muted-foreground",
+                          )}
+                        >
+                          {String.fromCharCode(65 + oi)}. {o}
+                          {isChosen && !isCorrect && " — sizin cavabınız"}
+                          {isCorrect && " — doğru cavab"}
+                        </div>
+                      );
+                    })}
+                    {chosen === undefined && (
+                      <p className="text-xs font-medium text-muted-foreground">Cavablanmayıb</p>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
           </div>
-          <p className="mt-2 text-sm font-medium text-muted-foreground">{pct}% düzgün</p>
-          <Button
-            onClick={() => navigate({ to: "/" })}
-            className="mt-8 h-12 w-full rounded-xl text-base font-semibold"
-          >
+
+          <Button onClick={() => navigate({ to: "/" })} className="mt-8 h-12 w-full rounded-xl text-base font-semibold">
             Ana səhifəyə qayıt
           </Button>
         </div>
-      </Centered>
+      </main>
     );
   }
 
   const q = questions[current];
-  const selected = answers[current];
+  const selected = answers[q.id];
   const isLast = current === questions.length - 1;
   const progress = ((current + 1) / questions.length) * 100;
 
@@ -190,34 +340,31 @@ function QuizPage() {
             </div>
           </div>
         )}
-        <div className="mb-6 flex items-center justify-between text-sm font-medium text-muted-foreground">
-          <span>{config.assessmentName} · Sıra #{config.seat}</span>
+        <div className="mb-2 flex items-center justify-between text-sm font-medium text-muted-foreground">
           <span>
-            Sual {current + 1} / {questions.length}
+            {config.assessmentName}
+            {config.seat ? ` · Sıra #${config.seat}` : ""}
+          </span>
+          <span className="text-right">
+            {current + 1} / {questions.length}
+            {q.pdf_number != null && (
+              <span className="ml-2 rounded-md bg-secondary px-2 py-0.5 text-xs font-semibold text-primary">PDF #{q.pdf_number}</span>
+            )}
           </span>
         </div>
-        <div className="mb-8 h-2 w-full overflow-hidden rounded-full bg-secondary">
-          <div
-            className="h-full rounded-full transition-all duration-300"
-            style={{ width: `${progress}%`, background: "var(--gradient-accent)" }}
-          />
+        <div className="mb-6 h-2 w-full overflow-hidden rounded-full bg-secondary">
+          <div className="h-full rounded-full transition-all duration-300" style={{ width: `${progress}%`, background: "var(--gradient-accent)" }} />
         </div>
 
-        <div
-          className="rounded-3xl border border-border bg-card p-6 sm:p-8"
-          style={{ boxShadow: "var(--shadow-card)" }}
-        >
-          <h2 className="text-xl font-semibold leading-relaxed text-foreground">
-            {q.prompt}
-          </h2>
-
+        <div className="rounded-3xl border border-border bg-card p-6 sm:p-8" style={{ boxShadow: "var(--shadow-card)" }}>
+          <h2 className="text-xl font-semibold leading-relaxed text-foreground">{q.prompt}</h2>
           <div className="mt-6 space-y-3">
             {q.options.map((opt, i) => {
               const active = selected === i;
               return (
                 <button
                   key={i}
-                  onClick={() => setAnswers((a) => ({ ...a, [current]: i }))}
+                  onClick={() => setAnswers((a) => ({ ...a, [q.id]: i }))}
                   className={cn(
                     "flex w-full items-center gap-3 rounded-2xl border p-4 text-left text-base transition-all",
                     active
@@ -228,16 +375,10 @@ function QuizPage() {
                   <span
                     className={cn(
                       "flex h-7 w-7 shrink-0 items-center justify-center rounded-full border text-sm font-semibold",
-                      active
-                        ? "border-primary bg-primary text-primary-foreground"
-                        : "border-border text-muted-foreground",
+                      active ? "border-primary bg-primary text-primary-foreground" : "border-border text-muted-foreground",
                     )}
                   >
-                    {active ? (
-                      <CheckCircle2 className="h-5 w-5" />
-                    ) : (
-                      String.fromCharCode(65 + i)
-                    )}
+                    {active ? <CheckCircle2 className="h-5 w-5" /> : String.fromCharCode(65 + i)}
                   </span>
                   <span>{opt}</span>
                 </button>
@@ -246,13 +387,38 @@ function QuizPage() {
           </div>
         </div>
 
-        <div className="mt-6 grid grid-cols-8 gap-2 sm:grid-cols-10">
-          {questions.map((_, i) => {
+        {/* Prev / Next directly under the question */}
+        <div className="mt-5 flex items-center justify-between gap-3">
+          <Button
+            variant="outline"
+            onClick={() => setCurrent((c) => Math.max(0, c - 1))}
+            disabled={current === 0}
+            className="h-12 rounded-xl"
+          >
+            <ArrowLeft className="mr-1 h-5 w-5" /> Geri
+          </Button>
+          {isLast ? (
+            <Button onClick={finish} disabled={saving} className="h-12 flex-1 rounded-xl text-base font-semibold">
+              {saving ? <Loader2 className="h-5 w-5 animate-spin" /> : "Testi bitir"}
+            </Button>
+          ) : (
+            <Button
+              onClick={() => setCurrent((c) => Math.min(questions.length - 1, c + 1))}
+              className="h-12 flex-1 rounded-xl text-base font-semibold"
+            >
+              Növbəti <ArrowRight className="ml-1 h-5 w-5" />
+            </Button>
+          )}
+        </div>
+
+        {/* Numbered navigation below the buttons */}
+        <div className="mt-5 grid grid-cols-6 gap-2 sm:grid-cols-10">
+          {questions.map((qq, i) => {
             const isCurrent = i === current;
-            const answered = answers[i] !== undefined;
+            const answered = answers[qq.id] !== undefined;
             return (
               <button
-                key={i}
+                key={qq.id}
                 onClick={() => setCurrent(i)}
                 className={cn(
                   "flex h-10 items-center justify-center rounded-xl border text-sm font-semibold transition-all",
@@ -269,33 +435,32 @@ function QuizPage() {
           })}
         </div>
 
-        <div className="mt-6 flex items-center justify-between gap-3">
-          <Button
-            variant="outline"
-            onClick={() => setCurrent((c) => Math.max(0, c - 1))}
-            disabled={current === 0}
-            className="h-12 rounded-xl"
-          >
-            <ArrowLeft className="mr-1 h-5 w-5" />
-            Əvvəlki
-          </Button>
-
-          {isLast ? (
-            <Button
-              onClick={finish}
-              disabled={saving}
-              className="h-12 flex-1 rounded-xl text-base font-semibold"
-            >
-              {saving ? <Loader2 className="h-5 w-5 animate-spin" /> : "Testi bitir"}
-            </Button>
+        {/* Report a problem */}
+        <div className="mt-6">
+          {reporting ? (
+            <div className="rounded-2xl border border-border bg-card p-4">
+              <p className="mb-2 text-sm font-medium text-foreground">
+                Problemi bildir {q.pdf_number != null && <span className="text-muted-foreground">(PDF #{q.pdf_number})</span>}
+              </p>
+              <textarea
+                value={reportText}
+                onChange={(e) => setReportText(e.target.value)}
+                rows={2}
+                className="w-full rounded-xl border border-border bg-background p-3 text-sm"
+                placeholder="Məsələn: variantlar səhvdir…"
+              />
+              <div className="mt-2 flex gap-2">
+                <Button size="sm" onClick={submitReport} className="rounded-lg">Göndər</Button>
+                <Button size="sm" variant="outline" onClick={() => setReporting(false)} className="rounded-lg">Ləğv et</Button>
+              </div>
+            </div>
           ) : (
-            <Button
-              onClick={() => setCurrent((c) => Math.min(questions.length - 1, c + 1))}
-              className="h-12 flex-1 rounded-xl text-base font-semibold"
+            <button
+              onClick={() => setReporting(true)}
+              className="inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground transition-colors hover:text-destructive"
             >
-              Növbəti
-              <ArrowRight className="ml-1 h-5 w-5" />
-            </Button>
+              <Flag className="h-4 w-4" /> Problemi bildir
+            </button>
           )}
         </div>
       </div>
