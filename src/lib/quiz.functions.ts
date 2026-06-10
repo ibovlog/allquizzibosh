@@ -765,12 +765,26 @@ export const reportProblem = createServerFn({ method: "POST" })
         assessment_id: z.string().uuid(),
         seat_number: z.number().int().min(1).max(100000).nullable().optional(),
         pdf_number: z.number().int().nullable().optional(),
+        question_id: z.string().uuid().nullable().optional(),
+        question_text: z.string().max(4000).nullable().optional(),
+        access_key: z.string().max(60).nullable().optional(),
         body: z.string().trim().min(1).max(1000),
       })
       .parse(input),
   )
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    // Persist a structured problem report for the admin "Problems" tab.
+    await supabaseAdmin.from("problem_reports").insert({
+      assessment_id: data.assessment_id,
+      question_id: data.question_id ?? null,
+      pdf_number: data.pdf_number ?? null,
+      question_text: data.question_text ?? null,
+      seat_number: data.seat_number ?? null,
+      access_key: data.access_key ?? null,
+      reason: data.body,
+    } as never);
+    // Also send a live notification to the admin message feed.
     const prefix = data.pdf_number != null ? `[PDF #${data.pdf_number}] ` : "";
     const seat = data.seat_number != null ? `(Sıra #${data.seat_number}) ` : "";
     const { error } = await supabaseAdmin.from("admin_messages").insert({
@@ -780,6 +794,85 @@ export const reportProblem = createServerFn({ method: "POST" })
       kind: "warning",
     });
     if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
+// --- Problem reports (admin) ----------------------------------------------
+export const resolveProblemReport = createServerFn({ method: "POST" })
+  .inputValidator((input: unknown) =>
+    z
+      .object({ password: pw, id: z.string().uuid(), status: z.enum(["pending", "resolved"]) })
+      .parse(input),
+  )
+  .handler(async ({ data }) => {
+    if (!checkPassword(data.password)) throw new Error("UNAUTHORIZED");
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { error } = await supabaseAdmin
+      .from("problem_reports")
+      .update({ status: data.status } as never)
+      .eq("id", data.id);
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
+export const deleteProblemReport = createServerFn({ method: "POST" })
+  .inputValidator((input: unknown) =>
+    z.object({ password: pw, id: z.string().uuid() }).parse(input),
+  )
+  .handler(async ({ data }) => {
+    if (!checkPassword(data.password)) throw new Error("UNAUTHORIZED");
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { error } = await supabaseAdmin.from("problem_reports").delete().eq("id", data.id);
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
+// --- Finish an attempt: record result + mark completed ----------------------
+export const finishAttempt = createServerFn({ method: "POST" })
+  .inputValidator((input: unknown) =>
+    z
+      .object({
+        assessment_id: z.string().uuid(),
+        participant_id: z.string().uuid().nullable().optional(),
+        access_key_id: z.string().uuid().nullable().optional(),
+        seat_number: z.number().int().min(0).max(100000).nullable().optional(),
+        access_key: z.string().max(60).nullable().optional(),
+        score: z.number().int().min(0).max(5000),
+        total: z.number().int().min(0).max(5000),
+        blank_count: z.number().int().min(0).max(5000).default(0),
+        attempt_number: z.number().int().min(1).max(1000).default(1),
+        started_at: z.string().max(40).nullable().optional(),
+        details: z.array(z.record(z.string(), z.unknown())).max(5000).optional(),
+      })
+      .parse(input),
+  )
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { error } = await supabaseAdmin.from("quiz_results").insert({
+      assessment_id: data.assessment_id,
+      seat_number: data.seat_number ?? 0,
+      access_key: data.access_key ?? null,
+      score: data.score,
+      total: data.total,
+      blank_count: data.blank_count,
+      attempt_number: data.attempt_number,
+      started_at: data.started_at ?? null,
+      details: data.details ?? null,
+    } as never);
+    if (error) throw new Error(error.message);
+    // Mark identity completed and bump attempt count.
+    if (data.participant_id) {
+      await supabaseAdmin
+        .from("participants")
+        .update({ completed: true, attempt_count: data.attempt_number } as never)
+        .eq("id", data.participant_id);
+    }
+    if (data.access_key_id) {
+      await supabaseAdmin
+        .from("access_keys")
+        .update({ completed: true, attempt_count: data.attempt_number } as never)
+        .eq("id", data.access_key_id);
+    }
     return { ok: true };
   });
 
