@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import {
   ShieldCheck, Upload, Loader2, FileText, Trash2, ArrowLeft, BarChart3, Sparkles,
   FolderPlus, Users, MessageSquare, Plus, Pencil, Lock, Unlock, RotateCcw, Send,
-  Check, X, KeyRound, AlertTriangle, Search, Copy,
+  Check, X, KeyRound, AlertTriangle, Search, Copy, Flag,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,7 +18,7 @@ import {
   createAssessment, updateAssessment, deleteAssessment, saveQuestion, deleteQuestion,
   setParticipantBlocked, resetParticipant, deleteParticipant, sendMessage,
   createAccessKeys, setAccessKeyBlocked, resetAccessKey, deleteAccessKey,
-  resolveProcessingError, deleteProcessingError,
+  resolveProcessingError, deleteProcessingError, resolveProblemReport, deleteProblemReport,
 } from "@/lib/quiz.functions";
 import { docxToText } from "@/lib/quiz-client";
 import { pdfToImages } from "@/lib/pdf-to-images";
@@ -31,11 +31,13 @@ export const Route = createFileRoute("/admin")({
 type Assessment = {
   id: string; name: string; description: string | null; question_count: number;
   order_mode: string; is_open: boolean; login_mode: "seat" | "key" | "both";
-  seat_min: number; seat_max: number; resume_after_unblock: boolean; created_at: string;
+  seat_min: number; seat_max: number; resume_after_unblock: boolean;
+  shuffle_options: boolean; max_attempts: number; created_at: string;
 };
 type AdminResult = {
   id: string; assessment_id: string | null; seat_number: number; score: number;
-  total: number; details: unknown; created_at: string;
+  total: number; details: unknown; attempt_number: number; started_at: string | null;
+  blank_count: number | null; access_key: string | null; created_at: string;
 };
 type AdminQuestion = {
   id: string; assessment_id: string; prompt: string; options: string[];
@@ -43,16 +45,21 @@ type AdminQuestion = {
 };
 type Participant = {
   id: string; assessment_id: string; seat_number: number; access_key: string | null;
-  device_id: string | null; blocked: boolean; created_at: string;
+  device_id: string | null; blocked: boolean; completed: boolean; attempt_count: number; created_at: string;
 };
 type AccessKey = {
   id: string; assessment_id: string; key_code: string; device_id: string | null;
-  blocked: boolean; created_at: string;
+  blocked: boolean; completed: boolean; attempt_count: number; created_at: string;
 };
 type ProcessingError = {
   id: string; assessment_id: string | null; file_name: string | null;
   question_number: number | null; reason: string; raw_excerpt: string | null;
   question_id: string | null; status: string; created_at: string;
+};
+type ProblemReport = {
+  id: string; assessment_id: string; question_id: string | null; pdf_number: number | null;
+  question_text: string | null; seat_number: number | null; access_key: string | null;
+  reason: string; status: string; created_at: string;
 };
 
 function AdminPage() {
@@ -76,6 +83,8 @@ function AdminPage() {
   const removeKey = useServerFn(deleteAccessKey);
   const resolveErr = useServerFn(resolveProcessingError);
   const removeErr = useServerFn(deleteProcessingError);
+  const resolveReport = useServerFn(resolveProblemReport);
+  const removeReport = useServerFn(deleteProblemReport);
 
   const [password, setPassword] = useState("");
   const [authed, setAuthed] = useState(false);
@@ -86,6 +95,7 @@ function AdminPage() {
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [accessKeys, setAccessKeys] = useState<AccessKey[]>([]);
   const [procErrors, setProcErrors] = useState<ProcessingError[]>([]);
+  const [problemReports, setProblemReports] = useState<ProblemReport[]>([]);
   const [selected, setSelected] = useState<string>("");
   const [uploading, setUploading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState("");
@@ -97,6 +107,8 @@ function AdminPage() {
   const [aLogin, setALogin] = useState<"seat" | "key" | "both">("seat");
   const [aSeatMin, setASeatMin] = useState("1");
   const [aSeatMax, setASeatMax] = useState("100");
+  const [aShuffleOpt, setAShuffleOpt] = useState(true);
+  const [aMaxAttempts, setAMaxAttempts] = useState("0");
 
   async function refresh(pw: string) {
     const data = await fetchData({ data: { password: pw } });
@@ -110,6 +122,7 @@ function AdminPage() {
     setParticipants(data.participants as Participant[]);
     setAccessKeys(data.accessKeys as AccessKey[]);
     setProcErrors(data.processingErrors as ProcessingError[]);
+    setProblemReports((data.problemReports ?? []) as ProblemReport[]);
     if (!selected && data.assessments.length > 0) {
       setSelected((data.assessments[0] as Assessment).id);
     }
