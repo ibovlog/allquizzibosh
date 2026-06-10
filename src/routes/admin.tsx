@@ -420,6 +420,16 @@ function AdminPage() {
             )}
           </TabsContent>
 
+          {/* ===== Problem reports ===== */}
+          <TabsContent value="problems">
+            {!selectedAssessment ? (
+              <Empty icon={<Flag />} text="Əvvəlcə assessment seçin." />
+            ) : (
+              <ProblemsPanel reports={aReports} questions={aQuestions} assessmentName={selectedAssessment.name}
+                password={password} onSave={storeQuestion} onResolve={resolveReport} onDelete={removeReport} refresh={() => refresh(password)} />
+            )}
+          </TabsContent>
+
           {/* ===== Results ===== */}
           <TabsContent value="results">
             {!selectedAssessment ? (
