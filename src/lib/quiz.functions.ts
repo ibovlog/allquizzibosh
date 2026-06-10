@@ -495,7 +495,7 @@ export const joinQuiz = createServerFn({ method: "POST" })
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { data: assessment } = await supabaseAdmin
       .from("assessments")
-      .select("id, name, question_count, order_mode, is_open, login_mode, seat_min, seat_max")
+      .select("id, name, question_count, order_mode, is_open, login_mode, seat_min, seat_max, shuffle_options, max_attempts")
       .ilike("name", data.assessment_name)
       .maybeSingle();
     if (!assessment) return { ok: false as const, reason: "Bu adda assessment tapılmadı." };
@@ -511,9 +511,42 @@ export const joinQuiz = createServerFn({ method: "POST" })
     if (needKey && (!data.access_key))
       return { ok: false as const, reason: "Giriş açarını daxil edin." };
 
+    const maxAttempts = (assessment as { max_attempts?: number }).max_attempts ?? 0;
+    const shuffleOptions = (assessment as { shuffle_options?: boolean }).shuffle_options ?? true;
+
+    // --- Device cross-lock: a device may only ever be used by ONE identity ---
+    const { data: devSeats } = await supabaseAdmin
+      .from("participants")
+      .select("seat_number")
+      .eq("assessment_id", assessment.id)
+      .eq("device_id", data.device_id);
+    for (const row of devSeats ?? []) {
+      if (!needSeat || row.seat_number !== data.seat_number) {
+        return {
+          ok: false as const,
+          reason: `Bu cihaz artıq Sıra #${row.seat_number} üçün istifadə olunub. Başqa nömrə və ya açarla giriş mümkün deyil.`,
+        };
+      }
+    }
+    const { data: devKeys } = await supabaseAdmin
+      .from("access_keys")
+      .select("key_code")
+      .eq("assessment_id", assessment.id)
+      .eq("device_id", data.device_id);
+    for (const row of devKeys ?? []) {
+      const code = (data.access_key ?? "").trim().toLowerCase();
+      if (!needKey || row.key_code.toLowerCase() !== code) {
+        return {
+          ok: false as const,
+          reason: `Bu cihaz artıq "${row.key_code}" açarı üçün istifadə olunub. Başqa açar və ya nömrə ilə giriş mümkün deyil.`,
+        };
+      }
+    }
+
     let participantId: string | null = null;
     let resumeIndex = 0;
     let resumeAnswers: Record<string, number> = {};
+    let attemptNumber = 1;
 
     // --- Seat validation + device lock ---
     if (needSeat) {
