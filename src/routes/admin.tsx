@@ -261,12 +261,13 @@ function AdminPage() {
         )}
 
         <Tabs defaultValue="assessments">
-          <TabsList className="mb-6 grid w-full grid-cols-3 rounded-xl sm:grid-cols-7">
+          <TabsList className="mb-6 grid w-full grid-cols-3 rounded-xl sm:grid-cols-8">
             <TabsTrigger value="assessments" className="rounded-lg"><FolderPlus className="mr-1 h-4 w-4" /> Paketlər</TabsTrigger>
             <TabsTrigger value="upload" className="rounded-lg"><Upload className="mr-1 h-4 w-4" /> Suallar</TabsTrigger>
             <TabsTrigger value="keys" className="rounded-lg"><KeyRound className="mr-1 h-4 w-4" /> Açarlar</TabsTrigger>
             <TabsTrigger value="participants" className="rounded-lg"><Users className="mr-1 h-4 w-4" /> İştirakçılar</TabsTrigger>
             <TabsTrigger value="messages" className="rounded-lg"><MessageSquare className="mr-1 h-4 w-4" /> Mesaj</TabsTrigger>
+            <TabsTrigger value="problems" className="rounded-lg"><Flag className="mr-1 h-4 w-4" /> Problemlər</TabsTrigger>
             <TabsTrigger value="errors" className="rounded-lg"><AlertTriangle className="mr-1 h-4 w-4" /> Xətalar</TabsTrigger>
             <TabsTrigger value="results" className="rounded-lg"><BarChart3 className="mr-1 h-4 w-4" /> Nəticələr</TabsTrigger>
           </TabsList>
