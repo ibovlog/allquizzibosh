@@ -87,6 +87,8 @@ export const createAssessment = createServerFn({ method: "POST" })
         login_mode: loginMode.default("seat"),
         seat_min: z.number().int().min(1).max(100000).default(1),
         seat_max: z.number().int().min(1).max(100000).default(1000),
+        shuffle_options: z.boolean().default(true),
+        max_attempts: z.number().int().min(0).max(100).default(0),
       })
       .parse(input),
   )
@@ -103,7 +105,9 @@ export const createAssessment = createServerFn({ method: "POST" })
         login_mode: data.login_mode,
         seat_min: Math.min(data.seat_min, data.seat_max),
         seat_max: Math.max(data.seat_min, data.seat_max),
-      })
+        shuffle_options: data.shuffle_options,
+        max_attempts: data.max_attempts,
+      } as never)
       .select("id")
       .single();
     if (error) {
@@ -128,6 +132,8 @@ export const updateAssessment = createServerFn({ method: "POST" })
         seat_max: z.number().int().min(1).max(100000).optional(),
         resume_after_unblock: z.boolean().optional(),
         is_open: z.boolean().optional(),
+        shuffle_options: z.boolean().optional(),
+        max_attempts: z.number().int().min(0).max(100).optional(),
       })
       .parse(input),
   )
@@ -144,6 +150,8 @@ export const updateAssessment = createServerFn({ method: "POST" })
     if (data.seat_max !== undefined) patch.seat_max = data.seat_max;
     if (data.resume_after_unblock !== undefined) patch.resume_after_unblock = data.resume_after_unblock;
     if (data.is_open !== undefined) patch.is_open = data.is_open;
+    if (data.shuffle_options !== undefined) patch.shuffle_options = data.shuffle_options;
+    if (data.max_attempts !== undefined) patch.max_attempts = data.max_attempts;
     const { error } = await supabaseAdmin.from("assessments").update(patch as never).eq("id", data.id);
     if (error) throw new Error(error.message);
     return { ok: true };
