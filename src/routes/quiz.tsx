@@ -44,6 +44,7 @@ function QuizPage() {
   const persist = useServerFn(saveProgress);
   const pollBlocked = useServerFn(checkBlocked);
   const sendReport = useServerFn(reportProblem);
+  const finalize = useServerFn(finishAttempt);
 
   const [config, setConfig] = useState<Config | null>(null);
   const [questions, setQuestions] = useState<QuizQuestion[] | null>(null);
@@ -52,6 +53,7 @@ function QuizPage() {
   const [answers, setAnswers] = useState<Record<string, number>>({});
   const [finished, setFinished] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const [messages, setMessages] = useState<Msg[]>([]);
   const [reporting, setReporting] = useState(false);
   const [reportText, setReportText] = useState("");
@@ -72,7 +74,7 @@ function QuizPage() {
           setQuestions([]);
           return;
         }
-        // keep a stable order across refreshes
+        // keep a stable question order across refreshes
         const savedOrder = sessionStorage.getItem("quizOrder");
         let ordered: QuizQuestion[];
         if (savedOrder) {
@@ -84,6 +86,23 @@ function QuizPage() {
           const base = cfg.order === "random" ? shuffle(all) : all;
           ordered = base.slice(0, Math.min(cfg.count, base.length));
           sessionStorage.setItem("quizOrder", JSON.stringify(ordered.map((q) => q.id)));
+        }
+        // dynamic answer-choice shuffling (stable across refreshes within an attempt)
+        if (cfg.shuffleOptions) {
+          let optMap: Record<string, number[]> = {};
+          const savedOpts = sessionStorage.getItem("quizOptions");
+          if (savedOpts) {
+            try { optMap = JSON.parse(savedOpts) as Record<string, number[]>; } catch { optMap = {}; }
+          }
+          ordered = ordered.map((q) => {
+            let order = optMap[q.id];
+            if (!order || order.length !== q.options.length) {
+              order = permutation(q.options.length);
+              optMap[q.id] = order;
+            }
+            return applyOptionOrder(q, order);
+          });
+          sessionStorage.setItem("quizOptions", JSON.stringify(optMap));
         }
         setQuestions(ordered);
         setCurrent(Math.min(cfg.resumeIndex ?? 0, Math.max(0, ordered.length - 1)));
