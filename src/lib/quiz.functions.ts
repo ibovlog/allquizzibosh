@@ -559,7 +559,7 @@ export const joinQuiz = createServerFn({ method: "POST" })
       }
       const { data: existing } = await supabaseAdmin
         .from("participants")
-        .select("id, device_id, blocked, current_index, answers")
+        .select("id, device_id, blocked, current_index, answers, completed, attempt_count")
         .eq("assessment_id", assessment.id)
         .eq("seat_number", seat)
         .maybeSingle();
@@ -575,8 +575,24 @@ export const joinQuiz = createServerFn({ method: "POST" })
           return { ok: false as const, reason: "Bu sıra nömrəsi başqa cihaza bağlıdır." };
         }
         participantId = existing.id;
-        resumeIndex = existing.current_index ?? 0;
-        resumeAnswers = (existing.answers as Record<string, number>) ?? {};
+        const done = (existing as { completed?: boolean }).completed ?? false;
+        const usedAttempts = (existing as { attempt_count?: number }).attempt_count ?? 0;
+        if (done) {
+          // Previous attempt finished — start a fresh attempt.
+          if (maxAttempts > 0 && usedAttempts >= maxAttempts) {
+            return { ok: false as const, reason: `Cəhd limiti dolub (${maxAttempts}).` };
+          }
+          await supabaseAdmin
+            .from("participants")
+            .update({ completed: false, current_index: 0, answers: {} } as never)
+            .eq("id", existing.id);
+          resumeIndex = 0;
+          resumeAnswers = {};
+        } else {
+          resumeIndex = existing.current_index ?? 0;
+          resumeAnswers = (existing.answers as Record<string, number>) ?? {};
+        }
+        attemptNumber = usedAttempts + 1;
       } else {
         const { data: ins, error } = await supabaseAdmin
           .from("participants")
