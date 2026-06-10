@@ -252,6 +252,9 @@ function QuizPage() {
           assessment_id: config.assessmentId,
           seat_number: config.seat,
           pdf_number: questions[current]?.pdf_number ?? null,
+          question_id: questions[current]?.id ?? null,
+          question_text: questions[current]?.prompt ?? null,
+          access_key: config.accessKey,
           body: reportText.trim(),
         },
       });
