@@ -1,16 +1,17 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
-import { CheckCircle2, Trophy, ArrowLeft, ArrowRight, Loader2, Bell, Flag, XCircle, Check } from "lucide-react";
+import { CheckCircle2, Trophy, ArrowLeft, ArrowRight, Loader2, Bell, Flag, XCircle, Check, Flag as FlagIcon, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-import { saveProgress, checkBlocked, reportProblem } from "@/lib/quiz.functions";
+import { saveProgress, checkBlocked, reportProblem, finishAttempt } from "@/lib/quiz.functions";
 import {
   fetchQuestions,
-  submitResult,
   shuffle,
+  permutation,
+  applyOptionOrder,
   type QuizQuestion,
   type ResultDetail,
 } from "@/lib/quiz-client";
@@ -31,6 +32,9 @@ type Config = {
   order: "sequential" | "random";
   resumeIndex: number;
   resumeAnswers: Record<string, number>;
+  shuffleOptions: boolean;
+  attemptNumber: number;
+  startedAt: string;
 };
 
 type Msg = { id: string; body: string; kind: string; created_at: string };
