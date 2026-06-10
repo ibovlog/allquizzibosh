@@ -1,7 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
-import { CheckCircle2, Trophy, ArrowLeft, ArrowRight, Loader2, Bell, Flag, XCircle, Check, Flag as FlagIcon, AlertTriangle } from "lucide-react";
+import { CheckCircle2, Trophy, ArrowLeft, ArrowRight, Loader2, Bell, Flag, XCircle, Check, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
