@@ -137,9 +137,13 @@ function Index() {
           order,
           resumeIndex: res.resumeIndex ?? 0,
           resumeAnswers: res.resumeAnswers ?? {},
+          shuffleOptions: res.assessment.shuffle_options ?? true,
+          attemptNumber: res.attemptNumber ?? 1,
+          startedAt: res.startedAt ?? new Date().toISOString(),
         }),
       );
       sessionStorage.removeItem("quizOrder");
+      sessionStorage.removeItem("quizOptions");
       navigate({ to: "/quiz" });
     } catch {
       setError("Giriş zamanı xəta baş verdi. Yenidən cəhd edin.");
