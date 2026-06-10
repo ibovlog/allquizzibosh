@@ -18,7 +18,9 @@ export type Database = {
         Row: {
           answers: Json
           assessment_id: string
+          attempt_count: number
           blocked: boolean
+          completed: boolean
           created_at: string
           current_index: number
           device_id: string | null
@@ -28,7 +30,9 @@ export type Database = {
         Insert: {
           answers?: Json
           assessment_id: string
+          attempt_count?: number
           blocked?: boolean
+          completed?: boolean
           created_at?: string
           current_index?: number
           device_id?: string | null
@@ -38,7 +42,9 @@ export type Database = {
         Update: {
           answers?: Json
           assessment_id?: string
+          attempt_count?: number
           blocked?: boolean
+          completed?: boolean
           created_at?: string
           current_index?: number
           device_id?: string | null
@@ -97,12 +103,14 @@ export type Database = {
           id: string
           is_open: boolean
           login_mode: string
+          max_attempts: number
           name: string
           order_mode: string
           question_count: number
           resume_after_unblock: boolean
           seat_max: number
           seat_min: number
+          shuffle_options: boolean
           updated_at: string
         }
         Insert: {
@@ -111,12 +119,14 @@ export type Database = {
           id?: string
           is_open?: boolean
           login_mode?: string
+          max_attempts?: number
           name: string
           order_mode?: string
           question_count?: number
           resume_after_unblock?: boolean
           seat_max?: number
           seat_min?: number
+          shuffle_options?: boolean
           updated_at?: string
         }
         Update: {
@@ -125,12 +135,14 @@ export type Database = {
           id?: string
           is_open?: boolean
           login_mode?: string
+          max_attempts?: number
           name?: string
           order_mode?: string
           question_count?: number
           resume_after_unblock?: boolean
           seat_max?: number
           seat_min?: number
+          shuffle_options?: boolean
           updated_at?: string
         }
         Relationships: []
@@ -140,7 +152,9 @@ export type Database = {
           access_key: string | null
           answers: Json
           assessment_id: string
+          attempt_count: number
           blocked: boolean
+          completed: boolean
           created_at: string
           current_index: number
           device_id: string | null
@@ -152,7 +166,9 @@ export type Database = {
           access_key?: string | null
           answers?: Json
           assessment_id: string
+          attempt_count?: number
           blocked?: boolean
+          completed?: boolean
           created_at?: string
           current_index?: number
           device_id?: string | null
@@ -164,7 +180,9 @@ export type Database = {
           access_key?: string | null
           answers?: Json
           assessment_id?: string
+          attempt_count?: number
           blocked?: boolean
+          completed?: boolean
           created_at?: string
           current_index?: number
           device_id?: string | null
@@ -181,6 +199,45 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      problem_reports: {
+        Row: {
+          access_key: string | null
+          assessment_id: string
+          created_at: string
+          id: string
+          pdf_number: number | null
+          question_id: string | null
+          question_text: string | null
+          reason: string
+          seat_number: number | null
+          status: string
+        }
+        Insert: {
+          access_key?: string | null
+          assessment_id: string
+          created_at?: string
+          id?: string
+          pdf_number?: number | null
+          question_id?: string | null
+          question_text?: string | null
+          reason: string
+          seat_number?: number | null
+          status?: string
+        }
+        Update: {
+          access_key?: string | null
+          assessment_id?: string
+          created_at?: string
+          id?: string
+          pdf_number?: number | null
+          question_id?: string | null
+          question_text?: string | null
+          reason?: string
+          seat_number?: number | null
+          status?: string
+        }
+        Relationships: []
       }
       processing_errors: {
         Row: {
@@ -279,30 +336,42 @@ export type Database = {
       }
       quiz_results: {
         Row: {
+          access_key: string | null
           assessment_id: string | null
+          attempt_number: number
+          blank_count: number | null
           created_at: string
           details: Json | null
           id: string
           score: number
           seat_number: number
+          started_at: string | null
           total: number
         }
         Insert: {
+          access_key?: string | null
           assessment_id?: string | null
+          attempt_number?: number
+          blank_count?: number | null
           created_at?: string
           details?: Json | null
           id?: string
           score: number
           seat_number: number
+          started_at?: string | null
           total: number
         }
         Update: {
+          access_key?: string | null
           assessment_id?: string | null
+          attempt_number?: number
+          blank_count?: number | null
           created_at?: string
           details?: Json | null
           id?: string
           score?: number
           seat_number?: number
+          started_at?: string | null
           total?: number
         }
         Relationships: [

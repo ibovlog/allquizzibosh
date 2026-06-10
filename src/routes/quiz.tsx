@@ -1,16 +1,17 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
-import { CheckCircle2, Trophy, ArrowLeft, ArrowRight, Loader2, Bell, Flag, XCircle, Check } from "lucide-react";
+import { CheckCircle2, Trophy, ArrowLeft, ArrowRight, Loader2, Bell, Flag, XCircle, Check, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-import { saveProgress, checkBlocked, reportProblem } from "@/lib/quiz.functions";
+import { saveProgress, checkBlocked, reportProblem, finishAttempt } from "@/lib/quiz.functions";
 import {
   fetchQuestions,
-  submitResult,
   shuffle,
+  permutation,
+  applyOptionOrder,
   type QuizQuestion,
   type ResultDetail,
 } from "@/lib/quiz-client";
@@ -31,6 +32,9 @@ type Config = {
   order: "sequential" | "random";
   resumeIndex: number;
   resumeAnswers: Record<string, number>;
+  shuffleOptions: boolean;
+  attemptNumber: number;
+  startedAt: string;
 };
 
 type Msg = { id: string; body: string; kind: string; created_at: string };
@@ -40,6 +44,7 @@ function QuizPage() {
   const persist = useServerFn(saveProgress);
   const pollBlocked = useServerFn(checkBlocked);
   const sendReport = useServerFn(reportProblem);
+  const finalize = useServerFn(finishAttempt);
 
   const [config, setConfig] = useState<Config | null>(null);
   const [questions, setQuestions] = useState<QuizQuestion[] | null>(null);
@@ -48,6 +53,7 @@ function QuizPage() {
   const [answers, setAnswers] = useState<Record<string, number>>({});
   const [finished, setFinished] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const [messages, setMessages] = useState<Msg[]>([]);
   const [reporting, setReporting] = useState(false);
   const [reportText, setReportText] = useState("");
@@ -68,7 +74,7 @@ function QuizPage() {
           setQuestions([]);
           return;
         }
-        // keep a stable order across refreshes
+        // keep a stable question order across refreshes
         const savedOrder = sessionStorage.getItem("quizOrder");
         let ordered: QuizQuestion[];
         if (savedOrder) {
@@ -80,6 +86,23 @@ function QuizPage() {
           const base = cfg.order === "random" ? shuffle(all) : all;
           ordered = base.slice(0, Math.min(cfg.count, base.length));
           sessionStorage.setItem("quizOrder", JSON.stringify(ordered.map((q) => q.id)));
+        }
+        // dynamic answer-choice shuffling (stable across refreshes within an attempt)
+        if (cfg.shuffleOptions) {
+          let optMap: Record<string, number[]> = {};
+          const savedOpts = sessionStorage.getItem("quizOptions");
+          if (savedOpts) {
+            try { optMap = JSON.parse(savedOpts) as Record<string, number[]>; } catch { optMap = {}; }
+          }
+          ordered = ordered.map((q) => {
+            let order = optMap[q.id];
+            if (!order || order.length !== q.options.length) {
+              order = permutation(q.options.length);
+              optMap[q.id] = order;
+            }
+            return applyOptionOrder(q, order);
+          });
+          sessionStorage.setItem("quizOptions", JSON.stringify(optMap));
         }
         setQuestions(ordered);
         setCurrent(Math.min(cfg.resumeIndex ?? 0, Math.max(0, ordered.length - 1)));
@@ -177,9 +200,16 @@ function QuizPage() {
     return questions.reduce((acc, q) => acc + (answers[q.id] === q.correct_index ? 1 : 0), 0);
   }, [questions, answers]);
 
-  async function finish() {
+  const unanswered = useMemo(
+    () => (questions ? questions.filter((q) => answers[q.id] === undefined).length : 0),
+    [questions, answers],
+  );
+
+  async function doFinish() {
     if (!questions || !config) return;
+    setConfirmOpen(false);
     setSaving(true);
+    const blank = questions.filter((q) => answers[q.id] === undefined).length;
     const details: ResultDetail[] = questions.map((q) => ({
       prompt: q.prompt,
       pdf_number: q.pdf_number,
@@ -188,16 +218,27 @@ function QuizPage() {
       correct: q.correct_index,
     }));
     try {
-      await submitResult({
-        assessment_id: config.assessmentId,
-        seat_number: config.seat ?? 0,
-        score,
-        total: questions.length,
-        details,
+      await finalize({
+        data: {
+          assessment_id: config.assessmentId,
+          participant_id: config.participantId,
+          access_key_id: config.accessKeyId,
+          seat_number: config.seat ?? 0,
+          access_key: config.accessKey,
+          score,
+          total: questions.length,
+          blank_count: blank,
+          attempt_number: config.attemptNumber,
+          started_at: config.startedAt,
+          details: details as unknown as Record<string, unknown>[],
+        },
       });
     } catch {
       /* ignore save errors for the student */
     }
+    // clear saved order/options so the next attempt reshuffles
+    sessionStorage.removeItem("quizOrder");
+    sessionStorage.removeItem("quizOptions");
     setSaving(false);
     setFinished(true);
   }
@@ -211,6 +252,9 @@ function QuizPage() {
           assessment_id: config.assessmentId,
           seat_number: config.seat,
           pdf_number: questions[current]?.pdf_number ?? null,
+          question_id: questions[current]?.id ?? null,
+          question_text: questions[current]?.prompt ?? null,
+          access_key: config.accessKey,
           body: reportText.trim(),
         },
       });
@@ -242,6 +286,9 @@ function QuizPage() {
 
   if (finished) {
     const pct = Math.round((score / questions.length) * 100);
+    const blank = questions.filter((q) => answers[q.id] === undefined).length;
+    const wrong = questions.length - score - blank;
+    const reviewList = questions.filter((q) => answers[q.id] !== q.correct_index);
     return (
       <main className="min-h-screen bg-background">
         <div className="mx-auto max-w-2xl px-4 py-8">
@@ -252,18 +299,38 @@ function QuizPage() {
             <h2 className="mt-5 text-2xl font-bold text-foreground">Test bitdi!</h2>
             <p className="mt-1 text-sm text-muted-foreground">
               {config.assessmentName}
-              {config.seat ? ` · Sıra nömrəsi: ${config.seat}` : ""}
+              {config.seat ? ` · Sıra nömrəsi: ${config.seat}` : ""} · Cəhd {config.attemptNumber}
             </p>
             <div className="mt-6 text-5xl font-bold text-primary">
               {score}
               <span className="text-2xl text-muted-foreground">/{questions.length}</span>
             </div>
             <p className="mt-2 text-sm font-medium text-muted-foreground">{pct}% düzgün</p>
+            <div className="mt-5 grid grid-cols-3 gap-2 text-sm">
+              <div className="rounded-xl border border-success/40 bg-success/10 p-3">
+                <p className="text-lg font-bold text-success">{score}</p>
+                <p className="text-xs text-muted-foreground">Düz</p>
+              </div>
+              <div className="rounded-xl border border-destructive/40 bg-destructive/10 p-3">
+                <p className="text-lg font-bold text-destructive">{wrong}</p>
+                <p className="text-xs text-muted-foreground">Səhv</p>
+              </div>
+              <div className="rounded-xl border border-border bg-secondary/40 p-3">
+                <p className="text-lg font-bold text-foreground">{blank}</p>
+                <p className="text-xs text-muted-foreground">Boş</p>
+              </div>
+            </div>
           </div>
 
-          <h3 className="mb-3 mt-8 text-lg font-bold text-foreground">Cavab hesabatı</h3>
+          <h3 className="mb-3 mt-8 text-lg font-bold text-foreground">Səhv və boş suallar</h3>
+          {reviewList.length === 0 ? (
+            <p className="rounded-2xl border border-success/40 bg-success/10 p-5 text-center text-sm font-medium text-success">
+              Bütün suallara düzgün cavab verdiniz! 🎉
+            </p>
+          ) : (
           <div className="space-y-3">
-            {questions.map((q, i) => {
+            {reviewList.map((q) => {
+              const i = questions.indexOf(q);
               const chosen = answers[q.id];
               const ok = chosen === q.correct_index;
               return (
@@ -307,6 +374,7 @@ function QuizPage() {
               );
             })}
           </div>
+          )}
 
           <Button onClick={() => navigate({ to: "/" })} className="mt-8 h-12 w-full rounded-xl text-base font-semibold">
             Ana səhifəyə qayıt
@@ -397,19 +465,24 @@ function QuizPage() {
           >
             <ArrowLeft className="mr-1 h-5 w-5" /> Geri
           </Button>
-          {isLast ? (
-            <Button onClick={finish} disabled={saving} className="h-12 flex-1 rounded-xl text-base font-semibold">
-              {saving ? <Loader2 className="h-5 w-5 animate-spin" /> : "Testi bitir"}
-            </Button>
-          ) : (
-            <Button
-              onClick={() => setCurrent((c) => Math.min(questions.length - 1, c + 1))}
-              className="h-12 flex-1 rounded-xl text-base font-semibold"
-            >
-              Növbəti <ArrowRight className="ml-1 h-5 w-5" />
-            </Button>
-          )}
+          <Button
+            variant="outline"
+            onClick={() => setCurrent((c) => Math.min(questions.length - 1, c + 1))}
+            disabled={isLast}
+            className="h-12 flex-1 rounded-xl text-base font-semibold"
+          >
+            Növbəti <ArrowRight className="ml-1 h-5 w-5" />
+          </Button>
         </div>
+
+        {/* Finish test — always visible */}
+        <Button
+          onClick={() => setConfirmOpen(true)}
+          disabled={saving}
+          className="mt-3 h-12 w-full rounded-xl text-base font-semibold"
+        >
+          {saving ? <Loader2 className="h-5 w-5 animate-spin" /> : "Testi bitir"}
+        </Button>
 
         {/* Numbered navigation below the buttons */}
         <div className="mt-5 grid grid-cols-6 gap-2 sm:grid-cols-10">
@@ -464,6 +537,30 @@ function QuizPage() {
           )}
         </div>
       </div>
+
+      {confirmOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-3xl border border-border bg-card p-6 text-center" style={{ boxShadow: "var(--shadow-card)" }}>
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+              <AlertTriangle className="h-7 w-7" />
+            </div>
+            <h3 className="mt-4 text-lg font-bold text-foreground">Testi bitirmək istədiyinizə əminsiniz?</h3>
+            {unanswered > 0 && (
+              <p className="mt-2 text-sm font-medium text-destructive">
+                Sizin {unanswered} cavablandırılmamış sualınız var.
+              </p>
+            )}
+            <div className="mt-6 flex flex-col gap-2">
+              <Button onClick={doFinish} disabled={saving} className="h-11 rounded-xl text-base font-semibold">
+                {saving ? <Loader2 className="h-5 w-5 animate-spin" /> : "Bəli, bitir və nəticəni göstər"}
+              </Button>
+              <Button variant="outline" onClick={() => setConfirmOpen(false)} className="h-11 rounded-xl">
+                {unanswered > 0 ? "Cavablandırılmamış suallara qayıt" : "Ləğv et"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

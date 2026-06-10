@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import {
   ShieldCheck, Upload, Loader2, FileText, Trash2, ArrowLeft, BarChart3, Sparkles,
   FolderPlus, Users, MessageSquare, Plus, Pencil, Lock, Unlock, RotateCcw, Send,
-  Check, X, KeyRound, AlertTriangle, Search, Copy,
+  Check, X, KeyRound, AlertTriangle, Search, Copy, Flag,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,7 +18,7 @@ import {
   createAssessment, updateAssessment, deleteAssessment, saveQuestion, deleteQuestion,
   setParticipantBlocked, resetParticipant, deleteParticipant, sendMessage,
   createAccessKeys, setAccessKeyBlocked, resetAccessKey, deleteAccessKey,
-  resolveProcessingError, deleteProcessingError,
+  resolveProcessingError, deleteProcessingError, resolveProblemReport, deleteProblemReport,
 } from "@/lib/quiz.functions";
 import { docxToText } from "@/lib/quiz-client";
 import { pdfToImages } from "@/lib/pdf-to-images";
@@ -31,11 +31,13 @@ export const Route = createFileRoute("/admin")({
 type Assessment = {
   id: string; name: string; description: string | null; question_count: number;
   order_mode: string; is_open: boolean; login_mode: "seat" | "key" | "both";
-  seat_min: number; seat_max: number; resume_after_unblock: boolean; created_at: string;
+  seat_min: number; seat_max: number; resume_after_unblock: boolean;
+  shuffle_options: boolean; max_attempts: number; created_at: string;
 };
 type AdminResult = {
   id: string; assessment_id: string | null; seat_number: number; score: number;
-  total: number; details: unknown; created_at: string;
+  total: number; details: unknown; attempt_number: number; started_at: string | null;
+  blank_count: number | null; access_key: string | null; created_at: string;
 };
 type AdminQuestion = {
   id: string; assessment_id: string; prompt: string; options: string[];
@@ -43,16 +45,21 @@ type AdminQuestion = {
 };
 type Participant = {
   id: string; assessment_id: string; seat_number: number; access_key: string | null;
-  device_id: string | null; blocked: boolean; created_at: string;
+  device_id: string | null; blocked: boolean; completed: boolean; attempt_count: number; created_at: string;
 };
 type AccessKey = {
   id: string; assessment_id: string; key_code: string; device_id: string | null;
-  blocked: boolean; created_at: string;
+  blocked: boolean; completed: boolean; attempt_count: number; created_at: string;
 };
 type ProcessingError = {
   id: string; assessment_id: string | null; file_name: string | null;
   question_number: number | null; reason: string; raw_excerpt: string | null;
   question_id: string | null; status: string; created_at: string;
+};
+type ProblemReport = {
+  id: string; assessment_id: string; question_id: string | null; pdf_number: number | null;
+  question_text: string | null; seat_number: number | null; access_key: string | null;
+  reason: string; status: string; created_at: string;
 };
 
 function AdminPage() {
@@ -76,6 +83,8 @@ function AdminPage() {
   const removeKey = useServerFn(deleteAccessKey);
   const resolveErr = useServerFn(resolveProcessingError);
   const removeErr = useServerFn(deleteProcessingError);
+  const resolveReport = useServerFn(resolveProblemReport);
+  const removeReport = useServerFn(deleteProblemReport);
 
   const [password, setPassword] = useState("");
   const [authed, setAuthed] = useState(false);
@@ -86,6 +95,7 @@ function AdminPage() {
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [accessKeys, setAccessKeys] = useState<AccessKey[]>([]);
   const [procErrors, setProcErrors] = useState<ProcessingError[]>([]);
+  const [problemReports, setProblemReports] = useState<ProblemReport[]>([]);
   const [selected, setSelected] = useState<string>("");
   const [uploading, setUploading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState("");
@@ -97,6 +107,8 @@ function AdminPage() {
   const [aLogin, setALogin] = useState<"seat" | "key" | "both">("seat");
   const [aSeatMin, setASeatMin] = useState("1");
   const [aSeatMax, setASeatMax] = useState("100");
+  const [aShuffleOpt, setAShuffleOpt] = useState(true);
+  const [aMaxAttempts, setAMaxAttempts] = useState("0");
 
   async function refresh(pw: string) {
     const data = await fetchData({ data: { password: pw } });
@@ -110,6 +122,7 @@ function AdminPage() {
     setParticipants(data.participants as Participant[]);
     setAccessKeys(data.accessKeys as AccessKey[]);
     setProcErrors(data.processingErrors as ProcessingError[]);
+    setProblemReports((data.problemReports ?? []) as ProblemReport[]);
     if (!selected && data.assessments.length > 0) {
       setSelected((data.assessments[0] as Assessment).id);
     }
@@ -136,6 +149,7 @@ function AdminPage() {
   const aKeys = useMemo(() => accessKeys.filter((k) => k.assessment_id === selected), [accessKeys, selected]);
   const aResults = useMemo(() => results.filter((r) => r.assessment_id === selected), [results, selected]);
   const aErrors = useMemo(() => procErrors.filter((e) => e.assessment_id === selected), [procErrors, selected]);
+  const aReports = useMemo(() => problemReports.filter((r) => r.assessment_id === selected), [problemReports, selected]);
 
   async function handleCreateAssessment() {
     if (!aName.trim()) { toast.error("Assessment adını daxil edin."); return; }
@@ -145,6 +159,7 @@ function AdminPage() {
           password, name: aName.trim(), question_count: parseInt(aCount, 10) || 20,
           order_mode: aOrder, login_mode: aLogin,
           seat_min: parseInt(aSeatMin, 10) || 1, seat_max: parseInt(aSeatMax, 10) || 100,
+          shuffle_options: aShuffleOpt, max_attempts: parseInt(aMaxAttempts, 10) || 0,
         },
       });
       setAName("");
@@ -246,12 +261,13 @@ function AdminPage() {
         )}
 
         <Tabs defaultValue="assessments">
-          <TabsList className="mb-6 grid w-full grid-cols-3 rounded-xl sm:grid-cols-7">
+          <TabsList className="mb-6 grid w-full grid-cols-3 rounded-xl sm:grid-cols-8">
             <TabsTrigger value="assessments" className="rounded-lg"><FolderPlus className="mr-1 h-4 w-4" /> Paketlər</TabsTrigger>
             <TabsTrigger value="upload" className="rounded-lg"><Upload className="mr-1 h-4 w-4" /> Suallar</TabsTrigger>
             <TabsTrigger value="keys" className="rounded-lg"><KeyRound className="mr-1 h-4 w-4" /> Açarlar</TabsTrigger>
             <TabsTrigger value="participants" className="rounded-lg"><Users className="mr-1 h-4 w-4" /> İştirakçılar</TabsTrigger>
             <TabsTrigger value="messages" className="rounded-lg"><MessageSquare className="mr-1 h-4 w-4" /> Mesaj</TabsTrigger>
+            <TabsTrigger value="problems" className="rounded-lg"><Flag className="mr-1 h-4 w-4" /> Problemlər</TabsTrigger>
             <TabsTrigger value="errors" className="rounded-lg"><AlertTriangle className="mr-1 h-4 w-4" /> Xətalar</TabsTrigger>
             <TabsTrigger value="results" className="rounded-lg"><BarChart3 className="mr-1 h-4 w-4" /> Nəticələr</TabsTrigger>
           </TabsList>
@@ -298,6 +314,14 @@ function AdminPage() {
                     </div>
                   </>
                 )}
+                <div className="space-y-1.5">
+                  <Label>Cəhd limiti (0 = limitsiz)</Label>
+                  <Input type="number" min={0} value={aMaxAttempts} onChange={(e) => setAMaxAttempts(e.target.value)} className="h-11 rounded-xl" />
+                </div>
+                <label className="flex items-center gap-2 self-end pb-2 text-sm text-foreground">
+                  <input type="checkbox" checked={aShuffleOpt} onChange={(e) => setAShuffleOpt(e.target.checked)} className="h-4 w-4" />
+                  Cavab variantlarını qarışdır
+                </label>
               </div>
               <Button onClick={handleCreateAssessment} className="mt-4 h-11 rounded-xl"><Plus className="mr-1 h-4 w-4" /> Yarat</Button>
             </div>
@@ -396,6 +420,16 @@ function AdminPage() {
             )}
           </TabsContent>
 
+          {/* ===== Problem reports ===== */}
+          <TabsContent value="problems">
+            {!selectedAssessment ? (
+              <Empty icon={<Flag />} text="Əvvəlcə assessment seçin." />
+            ) : (
+              <ProblemsPanel reports={aReports} questions={aQuestions} assessmentName={selectedAssessment.name}
+                password={password} onSave={storeQuestion} onResolve={resolveReport} onDelete={removeReport} refresh={() => refresh(password)} />
+            )}
+          </TabsContent>
+
           {/* ===== Results ===== */}
           <TabsContent value="results">
             {!selectedAssessment ? (
@@ -428,7 +462,7 @@ function AdminPage() {
 
 function AssessmentRow({ a, qCount, onSave, onToggle, onDelete }: {
   a: Assessment; qCount: number;
-  onSave: (patch: Partial<Pick<Assessment, "question_count" | "order_mode" | "login_mode" | "seat_min" | "seat_max" | "resume_after_unblock">>) => void;
+  onSave: (patch: Partial<Pick<Assessment, "question_count" | "order_mode" | "login_mode" | "seat_min" | "seat_max" | "resume_after_unblock" | "shuffle_options" | "max_attempts">>) => void;
   onToggle: () => void; onDelete: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -437,6 +471,8 @@ function AssessmentRow({ a, qCount, onSave, onToggle, onDelete }: {
   const [smin, setSmin] = useState(String(a.seat_min));
   const [smax, setSmax] = useState(String(a.seat_max));
   const [resume, setResume] = useState(a.resume_after_unblock);
+  const [shuffleOpt, setShuffleOpt] = useState(a.shuffle_options);
+  const [maxAtt, setMaxAtt] = useState(String(a.max_attempts));
   return (
     <div className="rounded-2xl border border-border bg-card p-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -444,7 +480,9 @@ function AssessmentRow({ a, qCount, onSave, onToggle, onDelete }: {
           <p className="font-semibold text-foreground">{a.name}</p>
           <p className="text-sm text-muted-foreground">
             {qCount} sual · {a.login_mode === "seat" ? "Sıra" : a.login_mode === "key" ? "Açar" : "Sıra+Açar"} ·{" "}
-            {a.login_mode !== "key" && `${a.seat_min}–${a.seat_max} · `}{a.is_open ? "Açıq" : "Bağlı"}
+            {a.login_mode !== "key" && `${a.seat_min}–${a.seat_max} · `}
+            {a.max_attempts === 0 ? "Limitsiz cəhd" : `${a.max_attempts} cəhd`} ·{" "}
+            {a.shuffle_options ? "Variantlar qarışıq" : "Variantlar sabit"} · {a.is_open ? "Açıq" : "Bağlı"}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -465,11 +503,17 @@ function AssessmentRow({ a, qCount, onSave, onToggle, onDelete }: {
             <Input type="number" min={1} value={smin} onChange={(e) => setSmin(e.target.value)} className="h-10 rounded-lg" /></div>
           <div className="space-y-1"><Label>Sıra max</Label>
             <Input type="number" min={1} value={smax} onChange={(e) => setSmax(e.target.value)} className="h-10 rounded-lg" /></div>
+          <div className="space-y-1"><Label>Cəhd limiti (0 = limitsiz)</Label>
+            <Input type="number" min={0} value={maxAtt} onChange={(e) => setMaxAtt(e.target.value)} className="h-10 rounded-lg" /></div>
+          <label className="flex items-center gap-2 text-sm text-foreground sm:col-span-2">
+            <input type="checkbox" checked={shuffleOpt} onChange={(e) => setShuffleOpt(e.target.checked)} className="h-4 w-4" />
+            Cavab variantlarını qarışdır
+          </label>
           <label className="flex items-center gap-2 text-sm text-foreground sm:col-span-2">
             <input type="checkbox" checked={resume} onChange={(e) => setResume(e.target.checked)} className="h-4 w-4" />
             Blokdan çıxarılan istifadəçi standart olaraq qaldığı yerdən davam etsin
           </label>
-          <Button onClick={() => onSave({ question_count: parseInt(count, 10) || a.question_count, login_mode: login, seat_min: parseInt(smin, 10) || 1, seat_max: parseInt(smax, 10) || 100, resume_after_unblock: resume })}
+          <Button onClick={() => onSave({ question_count: parseInt(count, 10) || a.question_count, login_mode: login, seat_min: parseInt(smin, 10) || 1, seat_max: parseInt(smax, 10) || 100, resume_after_unblock: resume, shuffle_options: shuffleOpt, max_attempts: parseInt(maxAtt, 10) || 0 })}
             className="h-10 rounded-lg sm:col-span-2">Saxla</Button>
         </div>
       )}
@@ -690,7 +734,12 @@ function ParticipantRow({ p, onBlock, onUnblock, onReset, onDelete }: {
         <div className={cn("flex h-11 w-11 items-center justify-center rounded-xl text-lg font-bold", p.blocked ? "bg-destructive/10 text-destructive" : "bg-primary/10 text-primary")}>{p.seat_number}</div>
         <div>
           <p className="font-semibold text-foreground">Sıra #{p.seat_number}</p>
-          <p className="text-xs text-muted-foreground">{p.blocked ? "Bloklanıb" : p.device_id ? "Cihaza bağlı" : "Boş cihaz"}{p.access_key ? ` · ${p.access_key}` : ""}</p>
+          <p className="text-xs text-muted-foreground">
+            {p.blocked ? "Bloklanıb" : p.device_id ? "Cihaza bağlı" : "Boş cihaz"}
+            {p.access_key ? ` · ${p.access_key}` : ""}
+            {` · ${p.attempt_count} cəhd`}
+            {p.completed ? " · Tamamlandı" : ""}
+          </p>
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-2">
@@ -797,18 +846,80 @@ function ErrorsPanel({ errors, questions, assessmentName, password, onSave, onRe
 
 type ResultDetailRow = { prompt: string; pdf_number: number | null; options: string[]; chosen: number | null; correct: number };
 
+function ProblemsPanel({ reports, questions, assessmentName, password, onSave, onResolve, onDelete, refresh }: {
+  reports: ProblemReport[]; questions: AdminQuestion[]; assessmentName: string; password: string;
+  onSave: ReturnType<typeof useServerFn>; onResolve: ReturnType<typeof useServerFn>; onDelete: ReturnType<typeof useServerFn>; refresh: () => Promise<void>;
+}) {
+  const [editing, setEditing] = useState<string | null>(null);
+  if (reports.length === 0) return <Empty icon={<Flag />} text="Bildirilən problem yoxdur. 🎉" />;
+  return (
+    <div className="space-y-3">
+      <p className="text-sm font-medium text-muted-foreground">{reports.length} bildiriş</p>
+      {reports.map((r) => {
+        const linked = r.question_id
+          ? questions.find((q) => q.id === r.question_id)
+          : questions.find((q) => q.pdf_number != null && q.pdf_number === r.pdf_number);
+        return (
+          <div key={r.id} className="rounded-2xl border border-border bg-card p-5">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className={cn("rounded-md px-2 py-0.5 text-xs font-semibold", r.status === "resolved" ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive")}>
+                    {r.status === "resolved" ? "Bağlandı" : "Açıq"}
+                  </span>
+                  {r.pdf_number != null && <span className="rounded-md bg-secondary px-2 py-0.5 text-xs font-semibold text-muted-foreground">PDF #{r.pdf_number}</span>}
+                  <span className="text-xs text-muted-foreground">
+                    {r.seat_number != null ? `Sıra #${r.seat_number}` : r.access_key ? `Açar: ${r.access_key}` : "Naməlum"}
+                  </span>
+                </div>
+                {r.question_text && <p className="mt-2 font-medium text-foreground">{r.question_text}</p>}
+                <p className="mt-1 text-sm text-foreground">🚩 {r.reason}</p>
+                <p className="mt-1 text-xs text-muted-foreground">{assessmentName} · {new Date(r.created_at).toLocaleString("az-AZ")}</p>
+              </div>
+              <div className="flex shrink-0 flex-wrap gap-2">
+                {linked && <Button size="sm" variant="outline" onClick={() => setEditing(editing === r.id ? null : r.id)} className="rounded-lg"><Pencil className="mr-1 h-4 w-4" /> Sualı düzəlt</Button>}
+                <Button size="sm" variant="outline" onClick={async () => { await onResolve({ data: { password, id: r.id, status: r.status === "resolved" ? "pending" : "resolved" } }); await refresh(); }} className="rounded-lg">
+                  {r.status === "resolved" ? "Yenidən aç" : <><Check className="mr-1 h-4 w-4" /> Təsdiqlə & bağla</>}
+                </Button>
+                <Button size="icon" variant="ghost" onClick={async () => { await onDelete({ data: { password, id: r.id } }); await refresh(); }} className="text-destructive hover:text-destructive" title="Rədd et"><Trash2 className="h-4 w-4" /></Button>
+              </div>
+            </div>
+            {editing === r.id && linked && (
+              <div className="mt-4">
+                <QuestionForm initial={linked} onCancel={() => setEditing(null)}
+                  onSubmit={async (vals) => { await onSave({ data: { password, id: linked.id, assessment_id: linked.assessment_id, ...vals } }); setEditing(null); await refresh(); toast.success("Sual düzəldildi, problem siyahıdan silindi."); }} />
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function ResultRow({ r }: { r: AdminResult }) {
   const [open, setOpen] = useState(false);
   const details = Array.isArray(r.details) ? (r.details as ResultDetailRow[]) : null;
   const pct = Math.round((r.score / Math.max(r.total, 1)) * 100);
+  const blank = r.blank_count ?? 0;
+  const wrong = r.total - r.score - blank;
   return (
     <div className="rounded-2xl border border-border bg-card p-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 text-lg font-bold text-primary">{r.seat_number || "—"}</div>
+          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 text-lg font-bold text-primary">{r.seat_number || (r.access_key ? "🔑" : "—")}</div>
           <div>
-            <p className="font-semibold text-foreground">{r.score}/{r.total} · {pct}%</p>
-            <p className="text-xs text-muted-foreground">{new Date(r.created_at).toLocaleString("az-AZ")}</p>
+            <p className="font-semibold text-foreground">
+              Cəhd {r.attempt_number} · {r.score}/{r.total} · {pct}%
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Düz {r.score} · Səhv {wrong} · Boş {blank}
+              {r.access_key ? ` · ${r.access_key}` : ""}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {r.started_at ? `Başlama: ${new Date(r.started_at).toLocaleString("az-AZ")} · ` : ""}
+              Bitirmə: {new Date(r.created_at).toLocaleString("az-AZ")}
+            </p>
           </div>
         </div>
         {details && <Button size="sm" variant="outline" onClick={() => setOpen((o) => !o)} className="rounded-lg">{open ? "Gizlət" : "Hesabat"}</Button>}

@@ -27,17 +27,17 @@ export const getAdminData = createServerFn({ method: "POST" })
     if (!checkPassword(data.password)) throw new Error("UNAUTHORIZED");
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
-    const [assessments, results, questions, participants, accessKeys, procErrors] =
+    const [assessments, results, questions, participants, accessKeys, procErrors, problemReports] =
       await Promise.all([
         supabaseAdmin
           .from("assessments")
           .select(
-            "id, name, description, question_count, order_mode, is_open, login_mode, seat_min, seat_max, resume_after_unblock, created_at",
+            "id, name, description, question_count, order_mode, is_open, login_mode, seat_min, seat_max, resume_after_unblock, shuffle_options, max_attempts, created_at",
           )
           .order("created_at", { ascending: false }),
         supabaseAdmin
           .from("quiz_results")
-          .select("id, assessment_id, seat_number, score, total, details, created_at")
+          .select("id, assessment_id, seat_number, score, total, details, attempt_number, started_at, blank_count, access_key, created_at")
           .order("created_at", { ascending: false }),
         supabaseAdmin
           .from("questions")
@@ -45,15 +45,19 @@ export const getAdminData = createServerFn({ method: "POST" })
           .order("position", { ascending: true }),
         supabaseAdmin
           .from("participants")
-          .select("id, assessment_id, seat_number, access_key, device_id, blocked, created_at")
+          .select("id, assessment_id, seat_number, access_key, device_id, blocked, completed, attempt_count, created_at")
           .order("seat_number", { ascending: true }),
         supabaseAdmin
           .from("access_keys")
-          .select("id, assessment_id, key_code, device_id, blocked, created_at")
+          .select("id, assessment_id, key_code, device_id, blocked, completed, attempt_count, created_at")
           .order("created_at", { ascending: true }),
         supabaseAdmin
           .from("processing_errors")
           .select("id, assessment_id, file_name, question_number, reason, raw_excerpt, question_id, status, created_at")
+          .order("created_at", { ascending: false }),
+        supabaseAdmin
+          .from("problem_reports")
+          .select("id, assessment_id, question_id, pdf_number, question_text, seat_number, access_key, reason, status, created_at")
           .order("created_at", { ascending: false }),
       ]);
 
@@ -63,6 +67,7 @@ export const getAdminData = createServerFn({ method: "POST" })
     if (participants.error) throw new Error(participants.error.message);
     if (accessKeys.error) throw new Error(accessKeys.error.message);
     if (procErrors.error) throw new Error(procErrors.error.message);
+    if (problemReports.error) throw new Error(problemReports.error.message);
 
     return {
       assessments: assessments.data ?? [],
@@ -71,6 +76,7 @@ export const getAdminData = createServerFn({ method: "POST" })
       participants: participants.data ?? [],
       accessKeys: accessKeys.data ?? [],
       processingErrors: procErrors.data ?? [],
+      problemReports: problemReports.data ?? [],
     };
   });
 
@@ -87,6 +93,8 @@ export const createAssessment = createServerFn({ method: "POST" })
         login_mode: loginMode.default("seat"),
         seat_min: z.number().int().min(1).max(100000).default(1),
         seat_max: z.number().int().min(1).max(100000).default(1000),
+        shuffle_options: z.boolean().default(true),
+        max_attempts: z.number().int().min(0).max(100).default(0),
       })
       .parse(input),
   )
@@ -103,7 +111,9 @@ export const createAssessment = createServerFn({ method: "POST" })
         login_mode: data.login_mode,
         seat_min: Math.min(data.seat_min, data.seat_max),
         seat_max: Math.max(data.seat_min, data.seat_max),
-      })
+        shuffle_options: data.shuffle_options,
+        max_attempts: data.max_attempts,
+      } as never)
       .select("id")
       .single();
     if (error) {
@@ -128,6 +138,8 @@ export const updateAssessment = createServerFn({ method: "POST" })
         seat_max: z.number().int().min(1).max(100000).optional(),
         resume_after_unblock: z.boolean().optional(),
         is_open: z.boolean().optional(),
+        shuffle_options: z.boolean().optional(),
+        max_attempts: z.number().int().min(0).max(100).optional(),
       })
       .parse(input),
   )
@@ -144,6 +156,8 @@ export const updateAssessment = createServerFn({ method: "POST" })
     if (data.seat_max !== undefined) patch.seat_max = data.seat_max;
     if (data.resume_after_unblock !== undefined) patch.resume_after_unblock = data.resume_after_unblock;
     if (data.is_open !== undefined) patch.is_open = data.is_open;
+    if (data.shuffle_options !== undefined) patch.shuffle_options = data.shuffle_options;
+    if (data.max_attempts !== undefined) patch.max_attempts = data.max_attempts;
     const { error } = await supabaseAdmin.from("assessments").update(patch as never).eq("id", data.id);
     if (error) throw new Error(error.message);
     return { ok: true };
@@ -191,6 +205,12 @@ export const saveQuestion = createServerFn({ method: "POST" })
       if (data.pdf_number !== undefined) patch.pdf_number = data.pdf_number;
       const { error } = await supabaseAdmin.from("questions").update(patch as never).eq("id", data.id);
       if (error) throw new Error(error.message);
+      // Editing a question auto-clears related problem reports and processing errors.
+      await supabaseAdmin.from("problem_reports").delete().eq("question_id", data.id);
+      await supabaseAdmin
+        .from("processing_errors")
+        .update({ status: "resolved" } as never)
+        .eq("question_id", data.id);
       return { ok: true };
     }
 
@@ -475,7 +495,7 @@ export const joinQuiz = createServerFn({ method: "POST" })
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { data: assessment } = await supabaseAdmin
       .from("assessments")
-      .select("id, name, question_count, order_mode, is_open, login_mode, seat_min, seat_max")
+      .select("id, name, question_count, order_mode, is_open, login_mode, seat_min, seat_max, shuffle_options, max_attempts")
       .ilike("name", data.assessment_name)
       .maybeSingle();
     if (!assessment) return { ok: false as const, reason: "Bu adda assessment tapılmadı." };
@@ -491,9 +511,42 @@ export const joinQuiz = createServerFn({ method: "POST" })
     if (needKey && (!data.access_key))
       return { ok: false as const, reason: "Giriş açarını daxil edin." };
 
+    const maxAttempts = (assessment as { max_attempts?: number }).max_attempts ?? 0;
+    const shuffleOptions = (assessment as { shuffle_options?: boolean }).shuffle_options ?? true;
+
+    // --- Device cross-lock: a device may only ever be used by ONE identity ---
+    const { data: devSeats } = await supabaseAdmin
+      .from("participants")
+      .select("seat_number")
+      .eq("assessment_id", assessment.id)
+      .eq("device_id", data.device_id);
+    for (const row of devSeats ?? []) {
+      if (!needSeat || row.seat_number !== data.seat_number) {
+        return {
+          ok: false as const,
+          reason: `Bu cihaz artıq Sıra #${row.seat_number} üçün istifadə olunub. Başqa nömrə və ya açarla giriş mümkün deyil.`,
+        };
+      }
+    }
+    const { data: devKeys } = await supabaseAdmin
+      .from("access_keys")
+      .select("key_code")
+      .eq("assessment_id", assessment.id)
+      .eq("device_id", data.device_id);
+    for (const row of devKeys ?? []) {
+      const code = (data.access_key ?? "").trim().toLowerCase();
+      if (!needKey || row.key_code.toLowerCase() !== code) {
+        return {
+          ok: false as const,
+          reason: `Bu cihaz artıq "${row.key_code}" açarı üçün istifadə olunub. Başqa açar və ya nömrə ilə giriş mümkün deyil.`,
+        };
+      }
+    }
+
     let participantId: string | null = null;
     let resumeIndex = 0;
     let resumeAnswers: Record<string, number> = {};
+    let attemptNumber = 1;
 
     // --- Seat validation + device lock ---
     if (needSeat) {
@@ -506,7 +559,7 @@ export const joinQuiz = createServerFn({ method: "POST" })
       }
       const { data: existing } = await supabaseAdmin
         .from("participants")
-        .select("id, device_id, blocked, current_index, answers")
+        .select("id, device_id, blocked, current_index, answers, completed, attempt_count")
         .eq("assessment_id", assessment.id)
         .eq("seat_number", seat)
         .maybeSingle();
@@ -522,8 +575,24 @@ export const joinQuiz = createServerFn({ method: "POST" })
           return { ok: false as const, reason: "Bu sıra nömrəsi başqa cihaza bağlıdır." };
         }
         participantId = existing.id;
-        resumeIndex = existing.current_index ?? 0;
-        resumeAnswers = (existing.answers as Record<string, number>) ?? {};
+        const done = (existing as { completed?: boolean }).completed ?? false;
+        const usedAttempts = (existing as { attempt_count?: number }).attempt_count ?? 0;
+        if (done) {
+          // Previous attempt finished — start a fresh attempt.
+          if (maxAttempts > 0 && usedAttempts >= maxAttempts) {
+            return { ok: false as const, reason: `Cəhd limiti dolub (${maxAttempts}).` };
+          }
+          await supabaseAdmin
+            .from("participants")
+            .update({ completed: false, current_index: 0, answers: {} } as never)
+            .eq("id", existing.id);
+          resumeIndex = 0;
+          resumeAnswers = {};
+        } else {
+          resumeIndex = existing.current_index ?? 0;
+          resumeAnswers = (existing.answers as Record<string, number>) ?? {};
+        }
+        attemptNumber = usedAttempts + 1;
       } else {
         const { data: ins, error } = await supabaseAdmin
           .from("participants")
@@ -550,7 +619,7 @@ export const joinQuiz = createServerFn({ method: "POST" })
       const code = (data.access_key as string).trim();
       const { data: keyRow } = await supabaseAdmin
         .from("access_keys")
-        .select("id, device_id, blocked, current_index, answers")
+        .select("id, device_id, blocked, current_index, answers, completed, attempt_count")
         .eq("assessment_id", assessment.id)
         .ilike("key_code", code)
         .maybeSingle();
@@ -566,10 +635,25 @@ export const joinQuiz = createServerFn({ method: "POST" })
         return { ok: false as const, reason: "Bu açar başqa cihaza bağlıdır." };
       }
       accessKeyId = keyRow.id;
-      if (!needSeat) {
+      const kDone = (keyRow as { completed?: boolean }).completed ?? false;
+      const kUsed = (keyRow as { attempt_count?: number }).attempt_count ?? 0;
+      if (kDone) {
+        if (maxAttempts > 0 && kUsed >= maxAttempts) {
+          return { ok: false as const, reason: `Cəhd limiti dolub (${maxAttempts}).` };
+        }
+        await supabaseAdmin
+          .from("access_keys")
+          .update({ completed: false, current_index: 0, answers: {} } as never)
+          .eq("id", keyRow.id);
+        if (!needSeat) {
+          resumeIndex = 0;
+          resumeAnswers = {};
+        }
+      } else if (!needSeat) {
         resumeIndex = keyRow.current_index ?? 0;
         resumeAnswers = (keyRow.answers as Record<string, number>) ?? {};
       }
+      if (!needSeat) attemptNumber = kUsed + 1;
     }
 
     return {
@@ -579,11 +663,15 @@ export const joinQuiz = createServerFn({ method: "POST" })
         name: assessment.name,
         question_count: assessment.question_count,
         order_mode: assessment.order_mode,
+        shuffle_options: shuffleOptions,
+        max_attempts: maxAttempts,
       },
       participantId,
       accessKeyId,
       resumeIndex,
       resumeAnswers,
+      attemptNumber,
+      startedAt: new Date().toISOString(),
     };
   });
 
@@ -677,12 +765,26 @@ export const reportProblem = createServerFn({ method: "POST" })
         assessment_id: z.string().uuid(),
         seat_number: z.number().int().min(1).max(100000).nullable().optional(),
         pdf_number: z.number().int().nullable().optional(),
+        question_id: z.string().uuid().nullable().optional(),
+        question_text: z.string().max(4000).nullable().optional(),
+        access_key: z.string().max(60).nullable().optional(),
         body: z.string().trim().min(1).max(1000),
       })
       .parse(input),
   )
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    // Persist a structured problem report for the admin "Problems" tab.
+    await supabaseAdmin.from("problem_reports").insert({
+      assessment_id: data.assessment_id,
+      question_id: data.question_id ?? null,
+      pdf_number: data.pdf_number ?? null,
+      question_text: data.question_text ?? null,
+      seat_number: data.seat_number ?? null,
+      access_key: data.access_key ?? null,
+      reason: data.body,
+    } as never);
+    // Also send a live notification to the admin message feed.
     const prefix = data.pdf_number != null ? `[PDF #${data.pdf_number}] ` : "";
     const seat = data.seat_number != null ? `(Sıra #${data.seat_number}) ` : "";
     const { error } = await supabaseAdmin.from("admin_messages").insert({
@@ -692,6 +794,85 @@ export const reportProblem = createServerFn({ method: "POST" })
       kind: "warning",
     });
     if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
+// --- Problem reports (admin) ----------------------------------------------
+export const resolveProblemReport = createServerFn({ method: "POST" })
+  .inputValidator((input: unknown) =>
+    z
+      .object({ password: pw, id: z.string().uuid(), status: z.enum(["pending", "resolved"]) })
+      .parse(input),
+  )
+  .handler(async ({ data }) => {
+    if (!checkPassword(data.password)) throw new Error("UNAUTHORIZED");
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { error } = await supabaseAdmin
+      .from("problem_reports")
+      .update({ status: data.status } as never)
+      .eq("id", data.id);
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
+export const deleteProblemReport = createServerFn({ method: "POST" })
+  .inputValidator((input: unknown) =>
+    z.object({ password: pw, id: z.string().uuid() }).parse(input),
+  )
+  .handler(async ({ data }) => {
+    if (!checkPassword(data.password)) throw new Error("UNAUTHORIZED");
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { error } = await supabaseAdmin.from("problem_reports").delete().eq("id", data.id);
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
+// --- Finish an attempt: record result + mark completed ----------------------
+export const finishAttempt = createServerFn({ method: "POST" })
+  .inputValidator((input: unknown) =>
+    z
+      .object({
+        assessment_id: z.string().uuid(),
+        participant_id: z.string().uuid().nullable().optional(),
+        access_key_id: z.string().uuid().nullable().optional(),
+        seat_number: z.number().int().min(0).max(100000).nullable().optional(),
+        access_key: z.string().max(60).nullable().optional(),
+        score: z.number().int().min(0).max(5000),
+        total: z.number().int().min(0).max(5000),
+        blank_count: z.number().int().min(0).max(5000).default(0),
+        attempt_number: z.number().int().min(1).max(1000).default(1),
+        started_at: z.string().max(40).nullable().optional(),
+        details: z.array(z.record(z.string(), z.unknown())).max(5000).optional(),
+      })
+      .parse(input),
+  )
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { error } = await supabaseAdmin.from("quiz_results").insert({
+      assessment_id: data.assessment_id,
+      seat_number: data.seat_number ?? 0,
+      access_key: data.access_key ?? null,
+      score: data.score,
+      total: data.total,
+      blank_count: data.blank_count,
+      attempt_number: data.attempt_number,
+      started_at: data.started_at ?? null,
+      details: data.details ?? null,
+    } as never);
+    if (error) throw new Error(error.message);
+    // Mark identity completed and bump attempt count.
+    if (data.participant_id) {
+      await supabaseAdmin
+        .from("participants")
+        .update({ completed: true, attempt_count: data.attempt_number } as never)
+        .eq("id", data.participant_id);
+    }
+    if (data.access_key_id) {
+      await supabaseAdmin
+        .from("access_keys")
+        .update({ completed: true, attempt_count: data.attempt_number } as never)
+        .eq("id", data.access_key_id);
+    }
     return { ok: true };
   });
 
