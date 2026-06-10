@@ -734,7 +734,12 @@ function ParticipantRow({ p, onBlock, onUnblock, onReset, onDelete }: {
         <div className={cn("flex h-11 w-11 items-center justify-center rounded-xl text-lg font-bold", p.blocked ? "bg-destructive/10 text-destructive" : "bg-primary/10 text-primary")}>{p.seat_number}</div>
         <div>
           <p className="font-semibold text-foreground">Sıra #{p.seat_number}</p>
-          <p className="text-xs text-muted-foreground">{p.blocked ? "Bloklanıb" : p.device_id ? "Cihaza bağlı" : "Boş cihaz"}{p.access_key ? ` · ${p.access_key}` : ""}</p>
+          <p className="text-xs text-muted-foreground">
+            {p.blocked ? "Bloklanıb" : p.device_id ? "Cihaza bağlı" : "Boş cihaz"}
+            {p.access_key ? ` · ${p.access_key}` : ""}
+            {` · ${p.attempt_count} cəhd`}
+            {p.completed ? " · Tamamlandı" : ""}
+          </p>
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-2">
