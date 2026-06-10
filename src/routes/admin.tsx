@@ -149,6 +149,7 @@ function AdminPage() {
   const aKeys = useMemo(() => accessKeys.filter((k) => k.assessment_id === selected), [accessKeys, selected]);
   const aResults = useMemo(() => results.filter((r) => r.assessment_id === selected), [results, selected]);
   const aErrors = useMemo(() => procErrors.filter((e) => e.assessment_id === selected), [procErrors, selected]);
+  const aReports = useMemo(() => problemReports.filter((r) => r.assessment_id === selected), [problemReports, selected]);
 
   async function handleCreateAssessment() {
     if (!aName.trim()) { toast.error("Assessment adını daxil edin."); return; }
@@ -158,6 +159,7 @@ function AdminPage() {
           password, name: aName.trim(), question_count: parseInt(aCount, 10) || 20,
           order_mode: aOrder, login_mode: aLogin,
           seat_min: parseInt(aSeatMin, 10) || 1, seat_max: parseInt(aSeatMax, 10) || 100,
+          shuffle_options: aShuffleOpt, max_attempts: parseInt(aMaxAttempts, 10) || 0,
         },
       });
       setAName("");
