@@ -27,17 +27,17 @@ export const getAdminData = createServerFn({ method: "POST" })
     if (!checkPassword(data.password)) throw new Error("UNAUTHORIZED");
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
-    const [assessments, results, questions, participants, accessKeys, procErrors] =
+    const [assessments, results, questions, participants, accessKeys, procErrors, problemReports] =
       await Promise.all([
         supabaseAdmin
           .from("assessments")
           .select(
-            "id, name, description, question_count, order_mode, is_open, login_mode, seat_min, seat_max, resume_after_unblock, created_at",
+            "id, name, description, question_count, order_mode, is_open, login_mode, seat_min, seat_max, resume_after_unblock, shuffle_options, max_attempts, created_at",
           )
           .order("created_at", { ascending: false }),
         supabaseAdmin
           .from("quiz_results")
-          .select("id, assessment_id, seat_number, score, total, details, created_at")
+          .select("id, assessment_id, seat_number, score, total, details, attempt_number, started_at, blank_count, access_key, created_at")
           .order("created_at", { ascending: false }),
         supabaseAdmin
           .from("questions")
@@ -45,15 +45,19 @@ export const getAdminData = createServerFn({ method: "POST" })
           .order("position", { ascending: true }),
         supabaseAdmin
           .from("participants")
-          .select("id, assessment_id, seat_number, access_key, device_id, blocked, created_at")
+          .select("id, assessment_id, seat_number, access_key, device_id, blocked, completed, attempt_count, created_at")
           .order("seat_number", { ascending: true }),
         supabaseAdmin
           .from("access_keys")
-          .select("id, assessment_id, key_code, device_id, blocked, created_at")
+          .select("id, assessment_id, key_code, device_id, blocked, completed, attempt_count, created_at")
           .order("created_at", { ascending: true }),
         supabaseAdmin
           .from("processing_errors")
           .select("id, assessment_id, file_name, question_number, reason, raw_excerpt, question_id, status, created_at")
+          .order("created_at", { ascending: false }),
+        supabaseAdmin
+          .from("problem_reports")
+          .select("id, assessment_id, question_id, pdf_number, question_text, seat_number, access_key, reason, status, created_at")
           .order("created_at", { ascending: false }),
       ]);
 
@@ -63,6 +67,7 @@ export const getAdminData = createServerFn({ method: "POST" })
     if (participants.error) throw new Error(participants.error.message);
     if (accessKeys.error) throw new Error(accessKeys.error.message);
     if (procErrors.error) throw new Error(procErrors.error.message);
+    if (problemReports.error) throw new Error(problemReports.error.message);
 
     return {
       assessments: assessments.data ?? [],
@@ -71,6 +76,7 @@ export const getAdminData = createServerFn({ method: "POST" })
       participants: participants.data ?? [],
       accessKeys: accessKeys.data ?? [],
       processingErrors: procErrors.data ?? [],
+      problemReports: problemReports.data ?? [],
     };
   });
 
