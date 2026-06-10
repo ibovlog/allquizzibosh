@@ -313,6 +313,14 @@ function AdminPage() {
                     </div>
                   </>
                 )}
+                <div className="space-y-1.5">
+                  <Label>Cəhd limiti (0 = limitsiz)</Label>
+                  <Input type="number" min={0} value={aMaxAttempts} onChange={(e) => setAMaxAttempts(e.target.value)} className="h-11 rounded-xl" />
+                </div>
+                <label className="flex items-center gap-2 self-end pb-2 text-sm text-foreground">
+                  <input type="checkbox" checked={aShuffleOpt} onChange={(e) => setAShuffleOpt(e.target.checked)} className="h-4 w-4" />
+                  Cavab variantlarını qarışdır
+                </label>
               </div>
               <Button onClick={handleCreateAssessment} className="mt-4 h-11 rounded-xl"><Plus className="mr-1 h-4 w-4" /> Yarat</Button>
             </div>
