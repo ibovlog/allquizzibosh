@@ -205,6 +205,12 @@ export const saveQuestion = createServerFn({ method: "POST" })
       if (data.pdf_number !== undefined) patch.pdf_number = data.pdf_number;
       const { error } = await supabaseAdmin.from("questions").update(patch as never).eq("id", data.id);
       if (error) throw new Error(error.message);
+      // Editing a question auto-clears related problem reports and processing errors.
+      await supabaseAdmin.from("problem_reports").delete().eq("question_id", data.id);
+      await supabaseAdmin
+        .from("processing_errors")
+        .update({ status: "resolved" } as never)
+        .eq("question_id", data.id);
       return { ok: true };
     }
 
