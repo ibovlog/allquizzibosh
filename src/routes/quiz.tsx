@@ -465,19 +465,24 @@ function QuizPage() {
           >
             <ArrowLeft className="mr-1 h-5 w-5" /> Geri
           </Button>
-          {isLast ? (
-            <Button onClick={finish} disabled={saving} className="h-12 flex-1 rounded-xl text-base font-semibold">
-              {saving ? <Loader2 className="h-5 w-5 animate-spin" /> : "Testi bitir"}
-            </Button>
-          ) : (
-            <Button
-              onClick={() => setCurrent((c) => Math.min(questions.length - 1, c + 1))}
-              className="h-12 flex-1 rounded-xl text-base font-semibold"
-            >
-              Növbəti <ArrowRight className="ml-1 h-5 w-5" />
-            </Button>
-          )}
+          <Button
+            variant="outline"
+            onClick={() => setCurrent((c) => Math.min(questions.length - 1, c + 1))}
+            disabled={isLast}
+            className="h-12 flex-1 rounded-xl text-base font-semibold"
+          >
+            Növbəti <ArrowRight className="ml-1 h-5 w-5" />
+          </Button>
         </div>
+
+        {/* Finish test — always visible */}
+        <Button
+          onClick={() => setConfirmOpen(true)}
+          disabled={saving}
+          className="mt-3 h-12 w-full rounded-xl text-base font-semibold"
+        >
+          {saving ? <Loader2 className="h-5 w-5 animate-spin" /> : "Testi bitir"}
+        </Button>
 
         {/* Numbered navigation below the buttons */}
         <div className="mt-5 grid grid-cols-6 gap-2 sm:grid-cols-10">
