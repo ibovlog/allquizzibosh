@@ -619,7 +619,7 @@ export const joinQuiz = createServerFn({ method: "POST" })
       const code = (data.access_key as string).trim();
       const { data: keyRow } = await supabaseAdmin
         .from("access_keys")
-        .select("id, device_id, blocked, current_index, answers")
+        .select("id, device_id, blocked, current_index, answers, completed, attempt_count")
         .eq("assessment_id", assessment.id)
         .ilike("key_code", code)
         .maybeSingle();
@@ -635,10 +635,25 @@ export const joinQuiz = createServerFn({ method: "POST" })
         return { ok: false as const, reason: "Bu açar başqa cihaza bağlıdır." };
       }
       accessKeyId = keyRow.id;
-      if (!needSeat) {
+      const kDone = (keyRow as { completed?: boolean }).completed ?? false;
+      const kUsed = (keyRow as { attempt_count?: number }).attempt_count ?? 0;
+      if (kDone) {
+        if (maxAttempts > 0 && kUsed >= maxAttempts) {
+          return { ok: false as const, reason: `Cəhd limiti dolub (${maxAttempts}).` };
+        }
+        await supabaseAdmin
+          .from("access_keys")
+          .update({ completed: false, current_index: 0, answers: {} } as never)
+          .eq("id", keyRow.id);
+        if (!needSeat) {
+          resumeIndex = 0;
+          resumeAnswers = {};
+        }
+      } else if (!needSeat) {
         resumeIndex = keyRow.current_index ?? 0;
         resumeAnswers = (keyRow.answers as Record<string, number>) ?? {};
       }
+      if (!needSeat) attemptNumber = kUsed + 1;
     }
 
     return {
@@ -648,11 +663,15 @@ export const joinQuiz = createServerFn({ method: "POST" })
         name: assessment.name,
         question_count: assessment.question_count,
         order_mode: assessment.order_mode,
+        shuffle_options: shuffleOptions,
+        max_attempts: maxAttempts,
       },
       participantId,
       accessKeyId,
       resumeIndex,
       resumeAnswers,
+      attemptNumber,
+      startedAt: new Date().toISOString(),
     };
   });
 
