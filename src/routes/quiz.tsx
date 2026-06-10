@@ -286,6 +286,9 @@ function QuizPage() {
 
   if (finished) {
     const pct = Math.round((score / questions.length) * 100);
+    const blank = questions.filter((q) => answers[q.id] === undefined).length;
+    const wrong = questions.length - score - blank;
+    const reviewList = questions.filter((q) => answers[q.id] !== q.correct_index);
     return (
       <main className="min-h-screen bg-background">
         <div className="mx-auto max-w-2xl px-4 py-8">
@@ -296,18 +299,38 @@ function QuizPage() {
             <h2 className="mt-5 text-2xl font-bold text-foreground">Test bitdi!</h2>
             <p className="mt-1 text-sm text-muted-foreground">
               {config.assessmentName}
-              {config.seat ? ` · Sıra nömrəsi: ${config.seat}` : ""}
+              {config.seat ? ` · Sıra nömrəsi: ${config.seat}` : ""} · Cəhd {config.attemptNumber}
             </p>
             <div className="mt-6 text-5xl font-bold text-primary">
               {score}
               <span className="text-2xl text-muted-foreground">/{questions.length}</span>
             </div>
             <p className="mt-2 text-sm font-medium text-muted-foreground">{pct}% düzgün</p>
+            <div className="mt-5 grid grid-cols-3 gap-2 text-sm">
+              <div className="rounded-xl border border-success/40 bg-success/10 p-3">
+                <p className="text-lg font-bold text-success">{score}</p>
+                <p className="text-xs text-muted-foreground">Düz</p>
+              </div>
+              <div className="rounded-xl border border-destructive/40 bg-destructive/10 p-3">
+                <p className="text-lg font-bold text-destructive">{wrong}</p>
+                <p className="text-xs text-muted-foreground">Səhv</p>
+              </div>
+              <div className="rounded-xl border border-border bg-secondary/40 p-3">
+                <p className="text-lg font-bold text-foreground">{blank}</p>
+                <p className="text-xs text-muted-foreground">Boş</p>
+              </div>
+            </div>
           </div>
 
-          <h3 className="mb-3 mt-8 text-lg font-bold text-foreground">Cavab hesabatı</h3>
+          <h3 className="mb-3 mt-8 text-lg font-bold text-foreground">Səhv və boş suallar</h3>
+          {reviewList.length === 0 ? (
+            <p className="rounded-2xl border border-success/40 bg-success/10 p-5 text-center text-sm font-medium text-success">
+              Bütün suallara düzgün cavab verdiniz! 🎉
+            </p>
+          ) : (
           <div className="space-y-3">
-            {questions.map((q, i) => {
+            {reviewList.map((q) => {
+              const i = questions.indexOf(q);
               const chosen = answers[q.id];
               const ok = chosen === q.correct_index;
               return (
@@ -351,6 +374,7 @@ function QuizPage() {
               );
             })}
           </div>
+          )}
 
           <Button onClick={() => navigate({ to: "/" })} className="mt-8 h-12 w-full rounded-xl text-base font-semibold">
             Ana səhifəyə qayıt
