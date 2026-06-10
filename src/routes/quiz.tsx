@@ -200,9 +200,16 @@ function QuizPage() {
     return questions.reduce((acc, q) => acc + (answers[q.id] === q.correct_index ? 1 : 0), 0);
   }, [questions, answers]);
 
-  async function finish() {
+  const unanswered = useMemo(
+    () => (questions ? questions.filter((q) => answers[q.id] === undefined).length : 0),
+    [questions, answers],
+  );
+
+  async function doFinish() {
     if (!questions || !config) return;
+    setConfirmOpen(false);
     setSaving(true);
+    const blank = questions.filter((q) => answers[q.id] === undefined).length;
     const details: ResultDetail[] = questions.map((q) => ({
       prompt: q.prompt,
       pdf_number: q.pdf_number,
@@ -211,16 +218,27 @@ function QuizPage() {
       correct: q.correct_index,
     }));
     try {
-      await submitResult({
-        assessment_id: config.assessmentId,
-        seat_number: config.seat ?? 0,
-        score,
-        total: questions.length,
-        details,
+      await finalize({
+        data: {
+          assessment_id: config.assessmentId,
+          participant_id: config.participantId,
+          access_key_id: config.accessKeyId,
+          seat_number: config.seat ?? 0,
+          access_key: config.accessKey,
+          score,
+          total: questions.length,
+          blank_count: blank,
+          attempt_number: config.attemptNumber,
+          started_at: config.startedAt,
+          details: details as unknown as Record<string, unknown>[],
+        },
       });
     } catch {
       /* ignore save errors for the student */
     }
+    // clear saved order/options so the next attempt reshuffles
+    sessionStorage.removeItem("quizOrder");
+    sessionStorage.removeItem("quizOptions");
     setSaving(false);
     setFinished(true);
   }
