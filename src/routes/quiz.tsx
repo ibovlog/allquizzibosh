@@ -537,6 +537,30 @@ function QuizPage() {
           )}
         </div>
       </div>
+
+      {confirmOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-3xl border border-border bg-card p-6 text-center" style={{ boxShadow: "var(--shadow-card)" }}>
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+              <AlertTriangle className="h-7 w-7" />
+            </div>
+            <h3 className="mt-4 text-lg font-bold text-foreground">Testi bitirmək istədiyinizə əminsiniz?</h3>
+            {unanswered > 0 && (
+              <p className="mt-2 text-sm font-medium text-destructive">
+                Sizin {unanswered} cavablandırılmamış sualınız var.
+              </p>
+            )}
+            <div className="mt-6 flex flex-col gap-2">
+              <Button onClick={doFinish} disabled={saving} className="h-11 rounded-xl text-base font-semibold">
+                {saving ? <Loader2 className="h-5 w-5 animate-spin" /> : "Bəli, bitir və nəticəni göstər"}
+              </Button>
+              <Button variant="outline" onClick={() => setConfirmOpen(false)} className="h-11 rounded-xl">
+                {unanswered > 0 ? "Cavablandırılmamış suallara qayıt" : "Ləğv et"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
