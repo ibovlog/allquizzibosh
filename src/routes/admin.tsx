@@ -841,6 +841,57 @@ function ErrorsPanel({ errors, questions, assessmentName, password, onSave, onRe
 
 type ResultDetailRow = { prompt: string; pdf_number: number | null; options: string[]; chosen: number | null; correct: number };
 
+function ProblemsPanel({ reports, questions, assessmentName, password, onSave, onResolve, onDelete, refresh }: {
+  reports: ProblemReport[]; questions: AdminQuestion[]; assessmentName: string; password: string;
+  onSave: ReturnType<typeof useServerFn>; onResolve: ReturnType<typeof useServerFn>; onDelete: ReturnType<typeof useServerFn>; refresh: () => Promise<void>;
+}) {
+  const [editing, setEditing] = useState<string | null>(null);
+  if (reports.length === 0) return <Empty icon={<Flag />} text="Bildirilən problem yoxdur. 🎉" />;
+  return (
+    <div className="space-y-3">
+      <p className="text-sm font-medium text-muted-foreground">{reports.length} bildiriş</p>
+      {reports.map((r) => {
+        const linked = r.question_id
+          ? questions.find((q) => q.id === r.question_id)
+          : questions.find((q) => q.pdf_number != null && q.pdf_number === r.pdf_number);
+        return (
+          <div key={r.id} className="rounded-2xl border border-border bg-card p-5">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className={cn("rounded-md px-2 py-0.5 text-xs font-semibold", r.status === "resolved" ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive")}>
+                    {r.status === "resolved" ? "Bağlandı" : "Açıq"}
+                  </span>
+                  {r.pdf_number != null && <span className="rounded-md bg-secondary px-2 py-0.5 text-xs font-semibold text-muted-foreground">PDF #{r.pdf_number}</span>}
+                  <span className="text-xs text-muted-foreground">
+                    {r.seat_number != null ? `Sıra #${r.seat_number}` : r.access_key ? `Açar: ${r.access_key}` : "Naməlum"}
+                  </span>
+                </div>
+                {r.question_text && <p className="mt-2 font-medium text-foreground">{r.question_text}</p>}
+                <p className="mt-1 text-sm text-foreground">🚩 {r.reason}</p>
+                <p className="mt-1 text-xs text-muted-foreground">{assessmentName} · {new Date(r.created_at).toLocaleString("az-AZ")}</p>
+              </div>
+              <div className="flex shrink-0 flex-wrap gap-2">
+                {linked && <Button size="sm" variant="outline" onClick={() => setEditing(editing === r.id ? null : r.id)} className="rounded-lg"><Pencil className="mr-1 h-4 w-4" /> Sualı düzəlt</Button>}
+                <Button size="sm" variant="outline" onClick={async () => { await onResolve({ data: { password, id: r.id, status: r.status === "resolved" ? "pending" : "resolved" } }); await refresh(); }} className="rounded-lg">
+                  {r.status === "resolved" ? "Yenidən aç" : <><Check className="mr-1 h-4 w-4" /> Təsdiqlə & bağla</>}
+                </Button>
+                <Button size="icon" variant="ghost" onClick={async () => { await onDelete({ data: { password, id: r.id } }); await refresh(); }} className="text-destructive hover:text-destructive" title="Rədd et"><Trash2 className="h-4 w-4" /></Button>
+              </div>
+            </div>
+            {editing === r.id && linked && (
+              <div className="mt-4">
+                <QuestionForm initial={linked} onCancel={() => setEditing(null)}
+                  onSubmit={async (vals) => { await onSave({ data: { password, id: linked.id, assessment_id: linked.assessment_id, ...vals } }); setEditing(null); await refresh(); toast.success("Sual düzəldildi, problem siyahıdan silindi."); }} />
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function ResultRow({ r }: { r: AdminResult }) {
   const [open, setOpen] = useState(false);
   const details = Array.isArray(r.details) ? (r.details as ResultDetailRow[]) : null;
