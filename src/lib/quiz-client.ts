@@ -72,3 +72,16 @@ export function shuffle<T>(arr: T[]): T[] {
   }
   return a;
 }
+
+// A random permutation of indices 0..n-1.
+export function permutation(n: number): number[] {
+  return shuffle(Array.from({ length: n }, (_, i) => i));
+}
+
+// Reorder a question's options by `order` and remap the correct index.
+export function applyOptionOrder(q: QuizQuestion, order: number[]): QuizQuestion {
+  if (!order || order.length !== q.options.length) return q;
+  const options = order.map((i) => q.options[i]);
+  const correct_index = Math.max(0, order.indexOf(q.correct_index));
+  return { ...q, options, correct_index };
+}
