@@ -163,7 +163,7 @@ function Index() {
       <div className="relative z-10 mx-auto flex min-h-screen max-w-lg flex-col items-center justify-center px-4 py-12">
         <div className="mb-6 flex items-center gap-2 rounded-full border border-border bg-card/80 px-4 py-1.5 text-sm font-medium text-primary shadow-sm">
           <Sparkles className="h-4 w-4" />
-          AI əsaslı Quiz
+          Quiz App — by @_.ibosh
         </div>
 
         <div className="w-full rounded-3xl border border-border bg-card p-7 sm:p-9" style={{ boxShadow: "var(--shadow-card)" }}>
