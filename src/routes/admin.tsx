@@ -845,14 +845,25 @@ function ResultRow({ r }: { r: AdminResult }) {
   const [open, setOpen] = useState(false);
   const details = Array.isArray(r.details) ? (r.details as ResultDetailRow[]) : null;
   const pct = Math.round((r.score / Math.max(r.total, 1)) * 100);
+  const blank = r.blank_count ?? 0;
+  const wrong = r.total - r.score - blank;
   return (
     <div className="rounded-2xl border border-border bg-card p-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 text-lg font-bold text-primary">{r.seat_number || "—"}</div>
+          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 text-lg font-bold text-primary">{r.seat_number || (r.access_key ? "🔑" : "—")}</div>
           <div>
-            <p className="font-semibold text-foreground">{r.score}/{r.total} · {pct}%</p>
-            <p className="text-xs text-muted-foreground">{new Date(r.created_at).toLocaleString("az-AZ")}</p>
+            <p className="font-semibold text-foreground">
+              Cəhd {r.attempt_number} · {r.score}/{r.total} · {pct}%
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Düz {r.score} · Səhv {wrong} · Boş {blank}
+              {r.access_key ? ` · ${r.access_key}` : ""}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {r.started_at ? `Başlama: ${new Date(r.started_at).toLocaleString("az-AZ")} · ` : ""}
+              Bitirmə: {new Date(r.created_at).toLocaleString("az-AZ")}
+            </p>
           </div>
         </div>
         {details && <Button size="sm" variant="outline" onClick={() => setOpen((o) => !o)} className="rounded-lg">{open ? "Gizlət" : "Hesabat"}</Button>}
