@@ -462,7 +462,7 @@ function AdminPage() {
 
 function AssessmentRow({ a, qCount, onSave, onToggle, onDelete }: {
   a: Assessment; qCount: number;
-  onSave: (patch: Partial<Pick<Assessment, "question_count" | "order_mode" | "login_mode" | "seat_min" | "seat_max" | "resume_after_unblock">>) => void;
+  onSave: (patch: Partial<Pick<Assessment, "question_count" | "order_mode" | "login_mode" | "seat_min" | "seat_max" | "resume_after_unblock" | "shuffle_options" | "max_attempts">>) => void;
   onToggle: () => void; onDelete: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -471,6 +471,8 @@ function AssessmentRow({ a, qCount, onSave, onToggle, onDelete }: {
   const [smin, setSmin] = useState(String(a.seat_min));
   const [smax, setSmax] = useState(String(a.seat_max));
   const [resume, setResume] = useState(a.resume_after_unblock);
+  const [shuffleOpt, setShuffleOpt] = useState(a.shuffle_options);
+  const [maxAtt, setMaxAtt] = useState(String(a.max_attempts));
   return (
     <div className="rounded-2xl border border-border bg-card p-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -478,7 +480,9 @@ function AssessmentRow({ a, qCount, onSave, onToggle, onDelete }: {
           <p className="font-semibold text-foreground">{a.name}</p>
           <p className="text-sm text-muted-foreground">
             {qCount} sual · {a.login_mode === "seat" ? "Sıra" : a.login_mode === "key" ? "Açar" : "Sıra+Açar"} ·{" "}
-            {a.login_mode !== "key" && `${a.seat_min}–${a.seat_max} · `}{a.is_open ? "Açıq" : "Bağlı"}
+            {a.login_mode !== "key" && `${a.seat_min}–${a.seat_max} · `}
+            {a.max_attempts === 0 ? "Limitsiz cəhd" : `${a.max_attempts} cəhd`} ·{" "}
+            {a.shuffle_options ? "Variantlar qarışıq" : "Variantlar sabit"} · {a.is_open ? "Açıq" : "Bağlı"}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -499,11 +503,17 @@ function AssessmentRow({ a, qCount, onSave, onToggle, onDelete }: {
             <Input type="number" min={1} value={smin} onChange={(e) => setSmin(e.target.value)} className="h-10 rounded-lg" /></div>
           <div className="space-y-1"><Label>Sıra max</Label>
             <Input type="number" min={1} value={smax} onChange={(e) => setSmax(e.target.value)} className="h-10 rounded-lg" /></div>
+          <div className="space-y-1"><Label>Cəhd limiti (0 = limitsiz)</Label>
+            <Input type="number" min={0} value={maxAtt} onChange={(e) => setMaxAtt(e.target.value)} className="h-10 rounded-lg" /></div>
+          <label className="flex items-center gap-2 text-sm text-foreground sm:col-span-2">
+            <input type="checkbox" checked={shuffleOpt} onChange={(e) => setShuffleOpt(e.target.checked)} className="h-4 w-4" />
+            Cavab variantlarını qarışdır
+          </label>
           <label className="flex items-center gap-2 text-sm text-foreground sm:col-span-2">
             <input type="checkbox" checked={resume} onChange={(e) => setResume(e.target.checked)} className="h-4 w-4" />
             Blokdan çıxarılan istifadəçi standart olaraq qaldığı yerdən davam etsin
           </label>
-          <Button onClick={() => onSave({ question_count: parseInt(count, 10) || a.question_count, login_mode: login, seat_min: parseInt(smin, 10) || 1, seat_max: parseInt(smax, 10) || 100, resume_after_unblock: resume })}
+          <Button onClick={() => onSave({ question_count: parseInt(count, 10) || a.question_count, login_mode: login, seat_min: parseInt(smin, 10) || 1, seat_max: parseInt(smax, 10) || 100, resume_after_unblock: resume, shuffle_options: shuffleOpt, max_attempts: parseInt(maxAtt, 10) || 0 })}
             className="h-10 rounded-lg sm:col-span-2">Saxla</Button>
         </div>
       )}
