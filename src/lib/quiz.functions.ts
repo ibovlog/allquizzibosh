@@ -32,7 +32,7 @@ export const getAdminData = createServerFn({ method: "POST" })
         supabaseAdmin
           .from("assessments")
           .select(
-            "id, name, description, question_count, order_mode, is_open, login_mode, seat_min, seat_max, resume_after_unblock, shuffle_options, max_attempts, created_at",
+            "id, name, description, question_count, order_mode, is_open, login_mode, seat_min, seat_max, resume_after_unblock, shuffle_options, max_attempts, allow_range, created_at",
           )
           .order("created_at", { ascending: false }),
         supabaseAdmin
@@ -95,6 +95,7 @@ export const createAssessment = createServerFn({ method: "POST" })
         seat_max: z.number().int().min(1).max(100000).default(1000),
         shuffle_options: z.boolean().default(true),
         max_attempts: z.number().int().min(0).max(100).default(0),
+        allow_range: z.boolean().default(true),
       })
       .parse(input),
   )
@@ -113,6 +114,7 @@ export const createAssessment = createServerFn({ method: "POST" })
         seat_max: Math.max(data.seat_min, data.seat_max),
         shuffle_options: data.shuffle_options,
         max_attempts: data.max_attempts,
+        allow_range: data.allow_range,
       } as never)
       .select("id")
       .single();
@@ -140,6 +142,7 @@ export const updateAssessment = createServerFn({ method: "POST" })
         is_open: z.boolean().optional(),
         shuffle_options: z.boolean().optional(),
         max_attempts: z.number().int().min(0).max(100).optional(),
+        allow_range: z.boolean().optional(),
       })
       .parse(input),
   )
@@ -158,6 +161,7 @@ export const updateAssessment = createServerFn({ method: "POST" })
     if (data.is_open !== undefined) patch.is_open = data.is_open;
     if (data.shuffle_options !== undefined) patch.shuffle_options = data.shuffle_options;
     if (data.max_attempts !== undefined) patch.max_attempts = data.max_attempts;
+    if (data.allow_range !== undefined) patch.allow_range = data.allow_range;
     const { error } = await supabaseAdmin.from("assessments").update(patch as never).eq("id", data.id);
     if (error) throw new Error(error.message);
     return { ok: true };
@@ -495,7 +499,7 @@ export const joinQuiz = createServerFn({ method: "POST" })
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { data: assessment } = await supabaseAdmin
       .from("assessments")
-      .select("id, name, question_count, order_mode, is_open, login_mode, seat_min, seat_max, shuffle_options, max_attempts")
+      .select("id, name, question_count, order_mode, is_open, login_mode, seat_min, seat_max, shuffle_options, max_attempts, allow_range")
       .ilike("name", data.assessment_name)
       .maybeSingle();
     if (!assessment) return { ok: false as const, reason: "Bu adda assessment tapılmadı." };
@@ -665,6 +669,7 @@ export const joinQuiz = createServerFn({ method: "POST" })
         order_mode: assessment.order_mode,
         shuffle_options: shuffleOptions,
         max_attempts: maxAttempts,
+        allow_range: (assessment as { allow_range?: boolean }).allow_range ?? true,
       },
       participantId,
       accessKeyId,
