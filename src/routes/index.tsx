@@ -198,6 +198,12 @@ function Index() {
 
   const needSeat = loaded && (loaded.login_mode === "seat" || loaded.login_mode === "both");
   const needKey = loaded && (loaded.login_mode === "key" || loaded.login_mode === "both");
+  const rs = parseInt(rangeStart, 10);
+  const re = parseInt(rangeEnd, 10);
+  const inRangeCount =
+    loaded && loaded.allow_range && rs && re && rs <= re
+      ? loaded.pdf_numbers.filter((n) => n >= rs && n <= re).length
+      : loaded?.available ?? 0;
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-background">
@@ -224,7 +230,7 @@ function Index() {
                 <Label htmlFor="assessment">Assessment adı</Label>
                 <Input
                   id="assessment"
-                  placeholder="Məs. karyerasuallar"
+                  placeholder="Məs. quiz1234"
                   value={assessmentName}
                   onChange={(e) => setAssessmentName(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && lookup()}
