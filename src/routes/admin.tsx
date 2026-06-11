@@ -32,7 +32,7 @@ type Assessment = {
   id: string; name: string; description: string | null; question_count: number;
   order_mode: string; is_open: boolean; login_mode: "seat" | "key" | "both";
   seat_min: number; seat_max: number; resume_after_unblock: boolean;
-  shuffle_options: boolean; max_attempts: number; created_at: string;
+  shuffle_options: boolean; max_attempts: number; allow_range: boolean; created_at: string;
 };
 type AdminResult = {
   id: string; assessment_id: string | null; seat_number: number; score: number;
@@ -109,6 +109,7 @@ function AdminPage() {
   const [aSeatMax, setASeatMax] = useState("100");
   const [aShuffleOpt, setAShuffleOpt] = useState(true);
   const [aMaxAttempts, setAMaxAttempts] = useState("0");
+  const [aAllowRange, setAAllowRange] = useState(true);
 
   async function refresh(pw: string) {
     const data = await fetchData({ data: { password: pw } });
@@ -160,6 +161,7 @@ function AdminPage() {
           order_mode: aOrder, login_mode: aLogin,
           seat_min: parseInt(aSeatMin, 10) || 1, seat_max: parseInt(aSeatMax, 10) || 100,
           shuffle_options: aShuffleOpt, max_attempts: parseInt(aMaxAttempts, 10) || 0,
+          allow_range: aAllowRange,
         },
       });
       setAName("");
@@ -279,7 +281,7 @@ function AdminPage() {
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="space-y-1.5">
                   <Label>Ad</Label>
-                  <Input placeholder="Məs. karyerasuallar" value={aName} onChange={(e) => setAName(e.target.value)} className="h-11 rounded-xl" />
+                  <Input placeholder="Məs. quiz1234" value={aName} onChange={(e) => setAName(e.target.value)} className="h-11 rounded-xl" />
                 </div>
                 <div className="space-y-1.5">
                   <Label>Standart sual sayı</Label>
@@ -321,6 +323,10 @@ function AdminPage() {
                 <label className="flex items-center gap-2 self-end pb-2 text-sm text-foreground">
                   <input type="checkbox" checked={aShuffleOpt} onChange={(e) => setAShuffleOpt(e.target.checked)} className="h-4 w-4" />
                   Cavab variantlarını qarışdır
+                </label>
+                <label className="flex items-center gap-2 self-end pb-2 text-sm text-foreground">
+                  <input type="checkbox" checked={aAllowRange} onChange={(e) => setAAllowRange(e.target.checked)} className="h-4 w-4" />
+                  PDF sual aralığı seçməyə icazə ver
                 </label>
               </div>
               <Button onClick={handleCreateAssessment} className="mt-4 h-11 rounded-xl"><Plus className="mr-1 h-4 w-4" /> Yarat</Button>
