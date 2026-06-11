@@ -124,7 +124,34 @@ function Index() {
       setError("Giriş açarını daxil edin.");
       return;
     }
-    const chosenCount = Math.max(1, Math.min(parseInt(count, 10) || loaded.available, loaded.available));
+    // PDF range validation + in-range availability
+    let rStart: number | null = null;
+    let rEnd: number | null = null;
+    let inRange = loaded.available;
+    if (loaded.allow_range) {
+      const pdfMin = loaded.pdf_numbers[0];
+      const pdfMax = loaded.pdf_numbers[loaded.pdf_numbers.length - 1];
+      rStart = parseInt(rangeStart, 10);
+      rEnd = parseInt(rangeEnd, 10);
+      if (!rStart || !rEnd) {
+        setError("PDF sual aralığını daxil edin.");
+        return;
+      }
+      if (rStart > rEnd) {
+        setError("Başlanğıc nömrəsi son nömrədən böyük ola bilməz.");
+        return;
+      }
+      if (rStart < pdfMin || rEnd > pdfMax) {
+        setError(`PDF nömrələri ${pdfMin}–${pdfMax} aralığında olmalıdır.`);
+        return;
+      }
+      inRange = loaded.pdf_numbers.filter((n) => n >= rStart! && n <= rEnd!).length;
+      if (inRange === 0) {
+        setError("Seçilmiş aralıqda sual yoxdur.");
+        return;
+      }
+    }
+    const chosenCount = Math.max(1, Math.min(parseInt(count, 10) || inRange, inRange));
     setLoading(true);
     try {
       const res = await join({
@@ -150,6 +177,8 @@ function Index() {
           accessKeyId: res.accessKeyId,
           count: chosenCount,
           order,
+          rangeStart: rStart,
+          rangeEnd: rEnd,
           resumeIndex: res.resumeIndex ?? 0,
           resumeAnswers: res.resumeAnswers ?? {},
           shuffleOptions: res.assessment.shuffle_options ?? true,
