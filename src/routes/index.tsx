@@ -298,13 +298,41 @@ function Index() {
                 </div>
               </div>
 
+              {loaded.allow_range && (
+                <div className="space-y-2">
+                  <Label>PDF sual aralığı (#{loaded.pdf_numbers[0]}–#{loaded.pdf_numbers[loaded.pdf_numbers.length - 1]})</Label>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="number"
+                      min={loaded.pdf_numbers[0]}
+                      max={loaded.pdf_numbers[loaded.pdf_numbers.length - 1]}
+                      value={rangeStart}
+                      onChange={(e) => setRangeStart(e.target.value)}
+                      className="h-12 rounded-xl text-base"
+                      aria-label="Başlanğıc"
+                    />
+                    <span className="text-muted-foreground">–</span>
+                    <Input
+                      type="number"
+                      min={loaded.pdf_numbers[0]}
+                      max={loaded.pdf_numbers[loaded.pdf_numbers.length - 1]}
+                      value={rangeEnd}
+                      onChange={(e) => setRangeEnd(e.target.value)}
+                      className="h-12 rounded-xl text-base"
+                      aria-label="Son"
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground">Bu aralıqda {inRangeCount} sual var.</p>
+                </div>
+              )}
+
               <div className="space-y-2">
-                <Label htmlFor="count">Sual sayı (maksimum {loaded.available})</Label>
+                <Label htmlFor="count">Sual sayı (maksimum {inRangeCount})</Label>
                 <Input
                   id="count"
                   type="number"
                   min={1}
-                  max={loaded.available}
+                  max={inRangeCount}
                   value={count}
                   onChange={(e) => setCount(e.target.value)}
                   className="h-12 rounded-xl text-base"
