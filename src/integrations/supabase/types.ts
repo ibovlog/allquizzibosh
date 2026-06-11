@@ -98,6 +98,7 @@ export type Database = {
       }
       assessments: {
         Row: {
+          allow_range: boolean
           created_at: string
           description: string | null
           id: string
@@ -114,6 +115,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          allow_range?: boolean
           created_at?: string
           description?: string | null
           id?: string
@@ -130,6 +132,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          allow_range?: boolean
           created_at?: string
           description?: string | null
           id?: string
