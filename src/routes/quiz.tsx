@@ -85,7 +85,21 @@ function QuizPage() {
           ordered = ids.map((id) => byId.get(id)).filter(Boolean) as QuizQuestion[];
           if (ordered.length === 0) ordered = all;
         } else {
-          const base = cfg.order === "random" ? shuffle(all) : all;
+          // Restrict to the chosen PDF question-number range (if any).
+          let pool = all;
+          if (cfg.rangeStart != null && cfg.rangeEnd != null) {
+            pool = all.filter(
+              (q) =>
+                q.pdf_number != null &&
+                q.pdf_number >= cfg.rangeStart! &&
+                q.pdf_number <= cfg.rangeEnd!,
+            );
+            if (pool.length === 0) pool = all;
+          }
+          const base =
+            cfg.order === "random"
+              ? shuffle(pool)
+              : [...pool].sort((a, b) => (a.pdf_number ?? a.position) - (b.pdf_number ?? b.position));
           ordered = base.slice(0, Math.min(cfg.count, base.length));
           sessionStorage.setItem("quizOrder", JSON.stringify(ordered.map((q) => q.id)));
         }
