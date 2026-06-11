@@ -1,0 +1,1 @@
+ALTER TABLE public.assessments ADD COLUMN IF NOT EXISTS allow_range boolean NOT NULL DEFAULT true;

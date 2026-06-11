@@ -31,6 +31,8 @@ type Loaded = {
   question_count: number;
   order_mode: "random" | "sequential";
   available: number;
+  allow_range: boolean;
+  pdf_numbers: number[];
 };
 
 function Index() {
@@ -42,6 +44,8 @@ function Index() {
   const [accessKey, setAccessKey] = useState("");
   const [order, setOrder] = useState<"random" | "sequential">("random");
   const [count, setCount] = useState("");
+  const [rangeStart, setRangeStart] = useState("");
+  const [rangeEnd, setRangeEnd] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -55,7 +59,7 @@ function Index() {
     try {
       const { data: a } = await supabase
         .from("assessments")
-        .select("id, name, login_mode, seat_min, seat_max, question_count, order_mode, is_open")
+        .select("id, name, login_mode, seat_min, seat_max, question_count, order_mode, is_open, allow_range")
         .ilike("name", assessmentName.trim())
         .maybeSingle();
       if (!a) {
@@ -66,16 +70,21 @@ function Index() {
         setError("Bu assessment hazırda bağlıdır.");
         return;
       }
-      const { count: avail } = await supabase
+      const { data: qrows } = await supabase
         .from("questions")
-        .select("id", { count: "exact", head: true })
+        .select("pdf_number")
         .eq("assessment_id", a.id);
-      const available = avail ?? 0;
+      const available = qrows?.length ?? 0;
+      const pdfNumbers = (qrows ?? [])
+        .map((r) => r.pdf_number)
+        .filter((n): n is number => typeof n === "number")
+        .sort((x, y) => x - y);
       if (available === 0) {
         setError("Bu assessmentdə hələ sual yoxdur.");
         return;
       }
       const lm = (a.login_mode as Loaded["login_mode"]) ?? "seat";
+      const allowRange = Boolean(a.allow_range) && pdfNumbers.length > 0;
       setLoaded({
         id: a.id,
         name: a.name,
@@ -85,9 +94,15 @@ function Index() {
         question_count: a.question_count,
         order_mode: (a.order_mode as "random" | "sequential") ?? "random",
         available,
+        allow_range: allowRange,
+        pdf_numbers: pdfNumbers,
       });
       setOrder((a.order_mode as "random" | "sequential") ?? "random");
       setCount(String(Math.min(a.question_count, available)));
+      if (allowRange) {
+        setRangeStart(String(pdfNumbers[0]));
+        setRangeEnd(String(pdfNumbers[pdfNumbers.length - 1]));
+      }
     } catch {
       setError("Yoxlama zamanı xəta baş verdi.");
     } finally {
@@ -109,7 +124,34 @@ function Index() {
       setError("Giriş açarını daxil edin.");
       return;
     }
-    const chosenCount = Math.max(1, Math.min(parseInt(count, 10) || loaded.available, loaded.available));
+    // PDF range validation + in-range availability
+    let rStart: number | null = null;
+    let rEnd: number | null = null;
+    let inRange = loaded.available;
+    if (loaded.allow_range) {
+      const pdfMin = loaded.pdf_numbers[0];
+      const pdfMax = loaded.pdf_numbers[loaded.pdf_numbers.length - 1];
+      rStart = parseInt(rangeStart, 10);
+      rEnd = parseInt(rangeEnd, 10);
+      if (!rStart || !rEnd) {
+        setError("PDF sual aralığını daxil edin.");
+        return;
+      }
+      if (rStart > rEnd) {
+        setError("Başlanğıc nömrəsi son nömrədən böyük ola bilməz.");
+        return;
+      }
+      if (rStart < pdfMin || rEnd > pdfMax) {
+        setError(`PDF nömrələri ${pdfMin}–${pdfMax} aralığında olmalıdır.`);
+        return;
+      }
+      inRange = loaded.pdf_numbers.filter((n) => n >= rStart! && n <= rEnd!).length;
+      if (inRange === 0) {
+        setError("Seçilmiş aralıqda sual yoxdur.");
+        return;
+      }
+    }
+    const chosenCount = Math.max(1, Math.min(parseInt(count, 10) || inRange, inRange));
     setLoading(true);
     try {
       const res = await join({
@@ -135,6 +177,8 @@ function Index() {
           accessKeyId: res.accessKeyId,
           count: chosenCount,
           order,
+          rangeStart: rStart,
+          rangeEnd: rEnd,
           resumeIndex: res.resumeIndex ?? 0,
           resumeAnswers: res.resumeAnswers ?? {},
           shuffleOptions: res.assessment.shuffle_options ?? true,
@@ -154,6 +198,12 @@ function Index() {
 
   const needSeat = loaded && (loaded.login_mode === "seat" || loaded.login_mode === "both");
   const needKey = loaded && (loaded.login_mode === "key" || loaded.login_mode === "both");
+  const rs = parseInt(rangeStart, 10);
+  const re = parseInt(rangeEnd, 10);
+  const inRangeCount =
+    loaded && loaded.allow_range && rs && re && rs <= re
+      ? loaded.pdf_numbers.filter((n) => n >= rs && n <= re).length
+      : loaded?.available ?? 0;
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-background">
@@ -180,7 +230,7 @@ function Index() {
                 <Label htmlFor="assessment">Assessment adı</Label>
                 <Input
                   id="assessment"
-                  placeholder="Məs. karyerasuallar"
+                  placeholder="Məs. quiz1234"
                   value={assessmentName}
                   onChange={(e) => setAssessmentName(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && lookup()}
@@ -248,13 +298,41 @@ function Index() {
                 </div>
               </div>
 
+              {loaded.allow_range && (
+                <div className="space-y-2">
+                  <Label>PDF sual aralığı (#{loaded.pdf_numbers[0]}–#{loaded.pdf_numbers[loaded.pdf_numbers.length - 1]})</Label>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="number"
+                      min={loaded.pdf_numbers[0]}
+                      max={loaded.pdf_numbers[loaded.pdf_numbers.length - 1]}
+                      value={rangeStart}
+                      onChange={(e) => setRangeStart(e.target.value)}
+                      className="h-12 rounded-xl text-base"
+                      aria-label="Başlanğıc"
+                    />
+                    <span className="text-muted-foreground">–</span>
+                    <Input
+                      type="number"
+                      min={loaded.pdf_numbers[0]}
+                      max={loaded.pdf_numbers[loaded.pdf_numbers.length - 1]}
+                      value={rangeEnd}
+                      onChange={(e) => setRangeEnd(e.target.value)}
+                      className="h-12 rounded-xl text-base"
+                      aria-label="Son"
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground">Bu aralıqda {inRangeCount} sual var.</p>
+                </div>
+              )}
+
               <div className="space-y-2">
-                <Label htmlFor="count">Sual sayı (maksimum {loaded.available})</Label>
+                <Label htmlFor="count">Sual sayı (maksimum {inRangeCount})</Label>
                 <Input
                   id="count"
                   type="number"
                   min={1}
-                  max={loaded.available}
+                  max={inRangeCount}
                   value={count}
                   onChange={(e) => setCount(e.target.value)}
                   className="h-12 rounded-xl text-base"
