@@ -31,6 +31,8 @@ type Loaded = {
   question_count: number;
   order_mode: "random" | "sequential";
   available: number;
+  allow_range: boolean;
+  pdf_numbers: number[];
 };
 
 function Index() {
@@ -42,6 +44,8 @@ function Index() {
   const [accessKey, setAccessKey] = useState("");
   const [order, setOrder] = useState<"random" | "sequential">("random");
   const [count, setCount] = useState("");
+  const [rangeStart, setRangeStart] = useState("");
+  const [rangeEnd, setRangeEnd] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -55,7 +59,7 @@ function Index() {
     try {
       const { data: a } = await supabase
         .from("assessments")
-        .select("id, name, login_mode, seat_min, seat_max, question_count, order_mode, is_open")
+        .select("id, name, login_mode, seat_min, seat_max, question_count, order_mode, is_open, allow_range")
         .ilike("name", assessmentName.trim())
         .maybeSingle();
       if (!a) {
@@ -66,16 +70,21 @@ function Index() {
         setError("Bu assessment hazırda bağlıdır.");
         return;
       }
-      const { count: avail } = await supabase
+      const { data: qrows } = await supabase
         .from("questions")
-        .select("id", { count: "exact", head: true })
+        .select("pdf_number")
         .eq("assessment_id", a.id);
-      const available = avail ?? 0;
+      const available = qrows?.length ?? 0;
+      const pdfNumbers = (qrows ?? [])
+        .map((r) => r.pdf_number)
+        .filter((n): n is number => typeof n === "number")
+        .sort((x, y) => x - y);
       if (available === 0) {
         setError("Bu assessmentdə hələ sual yoxdur.");
         return;
       }
       const lm = (a.login_mode as Loaded["login_mode"]) ?? "seat";
+      const allowRange = Boolean(a.allow_range) && pdfNumbers.length > 0;
       setLoaded({
         id: a.id,
         name: a.name,
@@ -85,9 +94,15 @@ function Index() {
         question_count: a.question_count,
         order_mode: (a.order_mode as "random" | "sequential") ?? "random",
         available,
+        allow_range: allowRange,
+        pdf_numbers: pdfNumbers,
       });
       setOrder((a.order_mode as "random" | "sequential") ?? "random");
       setCount(String(Math.min(a.question_count, available)));
+      if (allowRange) {
+        setRangeStart(String(pdfNumbers[0]));
+        setRangeEnd(String(pdfNumbers[pdfNumbers.length - 1]));
+      }
     } catch {
       setError("Yoxlama zamanı xəta baş verdi.");
     } finally {
