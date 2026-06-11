@@ -30,6 +30,8 @@ type Config = {
   accessKeyId: string | null;
   count: number;
   order: "sequential" | "random";
+  rangeStart: number | null;
+  rangeEnd: number | null;
   resumeIndex: number;
   resumeAnswers: Record<string, number>;
   shuffleOptions: boolean;
