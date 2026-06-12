@@ -4,7 +4,6 @@ export type QuizQuestion = {
   id: string;
   prompt: string;
   options: string[];
-  correct_index: number;
   position: number;
   pdf_number: number | null;
 };
@@ -12,7 +11,7 @@ export type QuizQuestion = {
 export async function fetchQuestions(assessmentId: string): Promise<QuizQuestion[]> {
   const { data, error } = await supabase
     .from("questions")
-    .select("id, prompt, options, correct_index, position, pdf_number")
+    .select("id, prompt, options, position, pdf_number")
     .eq("assessment_id", assessmentId)
     .order("position", { ascending: true });
   if (error) throw error;
@@ -30,17 +29,6 @@ export type ResultDetail = {
   chosen: number | null;
   correct: number;
 };
-
-export async function submitResult(input: {
-  assessment_id: string;
-  seat_number: number;
-  score: number;
-  total: number;
-  details?: ResultDetail[];
-}): Promise<void> {
-  const { error } = await supabase.from("quiz_results").insert(input);
-  if (error) throw error;
-}
 
 // Extract plain text from a .docx file in the browser using mammoth.
 export async function docxToText(file: File): Promise<string> {
@@ -82,6 +70,5 @@ export function permutation(n: number): number[] {
 export function applyOptionOrder(q: QuizQuestion, order: number[]): QuizQuestion {
   if (!order || order.length !== q.options.length) return q;
   const options = order.map((i) => q.options[i]);
-  const correct_index = Math.max(0, order.indexOf(q.correct_index));
-  return { ...q, options, correct_index };
+  return { ...q, options };
 }
