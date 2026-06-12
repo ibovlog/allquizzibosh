@@ -111,6 +111,7 @@ function QuizPage() {
           sessionStorage.setItem("quizOrder", JSON.stringify(ordered.map((q) => q.id)));
         }
         // dynamic answer-choice shuffling (stable across refreshes within an attempt)
+        const orders: Record<string, number[]> = {};
         if (cfg.shuffleOptions) {
           let optMap: Record<string, number[]> = {};
           const savedOpts = sessionStorage.getItem("quizOptions");
@@ -123,10 +124,16 @@ function QuizPage() {
               order = permutation(q.options.length);
               optMap[q.id] = order;
             }
+            orders[q.id] = order;
             return applyOptionOrder(q, order);
           });
           sessionStorage.setItem("quizOptions", JSON.stringify(optMap));
+        } else {
+          ordered.forEach((q) => {
+            orders[q.id] = q.options.map((_, i) => i);
+          });
         }
+        setOptionOrders(orders);
         setQuestions(ordered);
         setCurrent(Math.min(cfg.resumeIndex ?? 0, Math.max(0, ordered.length - 1)));
       })
