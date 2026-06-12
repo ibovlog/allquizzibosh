@@ -225,11 +225,6 @@ function QuizPage() {
     };
   }, [answers, current, config, finished, questions, persist]);
 
-  const score = useMemo(() => {
-    if (!questions) return 0;
-    return questions.reduce((acc, q) => acc + (answers[q.id] === q.correct_index ? 1 : 0), 0);
-  }, [questions, answers]);
-
   const unanswered = useMemo(
     () => (questions ? questions.filter((q) => answers[q.id] === undefined).length : 0),
     [questions, answers],
@@ -239,29 +234,37 @@ function QuizPage() {
     if (!questions || !config) return;
     setConfirmOpen(false);
     setSaving(true);
-    const blank = questions.filter((q) => answers[q.id] === undefined).length;
-    const details: ResultDetail[] = questions.map((q) => ({
-      prompt: q.prompt,
-      pdf_number: q.pdf_number,
-      options: q.options,
-      chosen: answers[q.id] ?? null,
-      correct: q.correct_index,
-    }));
+    // Convert each displayed answer to the ORIGINAL option index, since the
+    // server scores against the original (unshuffled) option order.
+    const payload = questions.map((q) => {
+      const displayed = answers[q.id];
+      const order = optionOrders[q.id];
+      const chosen =
+        displayed === undefined
+          ? null
+          : order && order[displayed] !== undefined
+            ? order[displayed]
+            : displayed;
+      return { question_id: q.id, chosen };
+    });
     try {
-      await finalize({
+      const res = await finalize({
         data: {
           assessment_id: config.assessmentId,
           participant_id: config.participantId,
           access_key_id: config.accessKeyId,
           seat_number: config.seat ?? 0,
           access_key: config.accessKey,
-          score,
-          total: questions.length,
-          blank_count: blank,
           attempt_number: config.attemptNumber,
           started_at: config.startedAt,
-          details: details as unknown as Record<string, unknown>[],
+          answers: payload,
         },
+      });
+      setResult({
+        score: res.score,
+        total: res.total,
+        blank_count: res.blank_count,
+        details: res.details as ResultDetail[],
       });
     } catch {
       /* ignore save errors for the student */
