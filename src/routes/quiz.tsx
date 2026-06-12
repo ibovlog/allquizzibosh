@@ -50,6 +50,13 @@ function QuizPage() {
 
   const [config, setConfig] = useState<Config | null>(null);
   const [questions, setQuestions] = useState<QuizQuestion[] | null>(null);
+  const [optionOrders, setOptionOrders] = useState<Record<string, number[]>>({});
+  const [result, setResult] = useState<{
+    score: number;
+    total: number;
+    blank_count: number;
+    details: ResultDetail[];
+  } | null>(null);
   const [loadError, setLoadError] = useState("");
   const [current, setCurrent] = useState(0);
   const [answers, setAnswers] = useState<Record<string, number>>({});
@@ -104,6 +111,7 @@ function QuizPage() {
           sessionStorage.setItem("quizOrder", JSON.stringify(ordered.map((q) => q.id)));
         }
         // dynamic answer-choice shuffling (stable across refreshes within an attempt)
+        const orders: Record<string, number[]> = {};
         if (cfg.shuffleOptions) {
           let optMap: Record<string, number[]> = {};
           const savedOpts = sessionStorage.getItem("quizOptions");
@@ -116,10 +124,16 @@ function QuizPage() {
               order = permutation(q.options.length);
               optMap[q.id] = order;
             }
+            orders[q.id] = order;
             return applyOptionOrder(q, order);
           });
           sessionStorage.setItem("quizOptions", JSON.stringify(optMap));
+        } else {
+          ordered.forEach((q) => {
+            orders[q.id] = q.options.map((_, i) => i);
+          });
         }
+        setOptionOrders(orders);
         setQuestions(ordered);
         setCurrent(Math.min(cfg.resumeIndex ?? 0, Math.max(0, ordered.length - 1)));
       })
@@ -211,11 +225,6 @@ function QuizPage() {
     };
   }, [answers, current, config, finished, questions, persist]);
 
-  const score = useMemo(() => {
-    if (!questions) return 0;
-    return questions.reduce((acc, q) => acc + (answers[q.id] === q.correct_index ? 1 : 0), 0);
-  }, [questions, answers]);
-
   const unanswered = useMemo(
     () => (questions ? questions.filter((q) => answers[q.id] === undefined).length : 0),
     [questions, answers],
@@ -225,32 +234,42 @@ function QuizPage() {
     if (!questions || !config) return;
     setConfirmOpen(false);
     setSaving(true);
-    const blank = questions.filter((q) => answers[q.id] === undefined).length;
-    const details: ResultDetail[] = questions.map((q) => ({
-      prompt: q.prompt,
-      pdf_number: q.pdf_number,
-      options: q.options,
-      chosen: answers[q.id] ?? null,
-      correct: q.correct_index,
-    }));
+    // Convert each displayed answer to the ORIGINAL option index, since the
+    // server scores against the original (unshuffled) option order.
+    const payload = questions.map((q) => {
+      const displayed = answers[q.id];
+      const order = optionOrders[q.id];
+      const chosen =
+        displayed === undefined
+          ? null
+          : order && order[displayed] !== undefined
+            ? order[displayed]
+            : displayed;
+      return { question_id: q.id, chosen };
+    });
     try {
-      await finalize({
+      const res = await finalize({
         data: {
           assessment_id: config.assessmentId,
           participant_id: config.participantId,
           access_key_id: config.accessKeyId,
           seat_number: config.seat ?? 0,
           access_key: config.accessKey,
-          score,
-          total: questions.length,
-          blank_count: blank,
           attempt_number: config.attemptNumber,
           started_at: config.startedAt,
-          details: details as unknown as Record<string, unknown>[],
+          answers: payload,
         },
       });
+      setResult({
+        score: res.score,
+        total: res.total,
+        blank_count: res.blank_count,
+        details: res.details as ResultDetail[],
+      });
     } catch {
-      /* ignore save errors for the student */
+      setSaving(false);
+      toast.error("Nəticə göndərilmədi. Yenidən cəhd edin.");
+      return;
     }
     // clear saved order/options so the next attempt reshuffles
     sessionStorage.removeItem("quizOrder");
@@ -300,11 +319,13 @@ function QuizPage() {
     );
   }
 
-  if (finished) {
-    const pct = Math.round((score / questions.length) * 100);
-    const blank = questions.filter((q) => answers[q.id] === undefined).length;
-    const wrong = questions.length - score - blank;
-    const reviewList = questions.filter((q) => answers[q.id] !== q.correct_index);
+  if (finished && result) {
+    const { score, total, blank_count: blank, details } = result;
+    const pct = total > 0 ? Math.round((score / total) * 100) : 0;
+    const wrong = total - score - blank;
+    const reviewList = details
+      .map((d, idx) => ({ d, idx }))
+      .filter(({ d }) => d.chosen !== d.correct);
     return (
       <main className="min-h-screen bg-background">
         <div className="mx-auto max-w-2xl px-4 py-8">
@@ -319,7 +340,7 @@ function QuizPage() {
             </p>
             <div className="mt-6 text-5xl font-bold text-primary">
               {score}
-              <span className="text-2xl text-muted-foreground">/{questions.length}</span>
+              <span className="text-2xl text-muted-foreground">/{total}</span>
             </div>
             <p className="mt-2 text-sm font-medium text-muted-foreground">{pct}% düzgün</p>
             <div className="mt-5 grid grid-cols-3 gap-2 text-sm">
@@ -345,24 +366,24 @@ function QuizPage() {
             </p>
           ) : (
           <div className="space-y-3">
-            {reviewList.map((q) => {
-              const i = questions.indexOf(q);
-              const chosen = answers[q.id];
-              const ok = chosen === q.correct_index;
+            {reviewList.map(({ d, idx }) => {
+              const i = idx;
+              const chosen = d.chosen;
+              const ok = chosen === d.correct;
               return (
-                <div key={q.id} className="rounded-2xl border border-border bg-card p-5">
+                <div key={i} className="rounded-2xl border border-border bg-card p-5">
                   <div className="flex items-start justify-between gap-2">
-                    <p className="font-medium text-foreground">{i + 1}. {q.prompt}</p>
+                    <p className="font-medium text-foreground">{i + 1}. {d.prompt}</p>
                     <div className="flex shrink-0 items-center gap-2">
-                      {q.pdf_number != null && (
-                        <span className="rounded-md bg-secondary px-2 py-0.5 text-xs font-semibold text-muted-foreground">PDF #{q.pdf_number}</span>
+                      {d.pdf_number != null && (
+                        <span className="rounded-md bg-secondary px-2 py-0.5 text-xs font-semibold text-muted-foreground">PDF #{d.pdf_number}</span>
                       )}
                       {ok ? <Check className="h-5 w-5 text-success" /> : <XCircle className="h-5 w-5 text-destructive" />}
                     </div>
                   </div>
                   <div className="mt-3 space-y-2">
-                    {q.options.map((o, oi) => {
-                      const isCorrect = oi === q.correct_index;
+                    {d.options.map((o, oi) => {
+                      const isCorrect = oi === d.correct;
                       const isChosen = oi === chosen;
                       return (
                         <div
@@ -382,7 +403,7 @@ function QuizPage() {
                         </div>
                       );
                     })}
-                    {chosen === undefined && (
+                    {chosen === null && (
                       <p className="text-xs font-medium text-muted-foreground">Cavablanmayıb</p>
                     )}
                   </div>
