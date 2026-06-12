@@ -267,7 +267,9 @@ function QuizPage() {
         details: res.details as ResultDetail[],
       });
     } catch {
-      /* ignore save errors for the student */
+      setSaving(false);
+      toast.error("Nəticə göndərilmədi. Yenidən cəhd edin.");
+      return;
     }
     // clear saved order/options so the next attempt reshuffles
     sessionStorage.removeItem("quizOrder");
