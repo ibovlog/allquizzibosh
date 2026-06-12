@@ -317,11 +317,13 @@ function QuizPage() {
     );
   }
 
-  if (finished) {
-    const pct = Math.round((score / questions.length) * 100);
-    const blank = questions.filter((q) => answers[q.id] === undefined).length;
-    const wrong = questions.length - score - blank;
-    const reviewList = questions.filter((q) => answers[q.id] !== q.correct_index);
+  if (finished && result) {
+    const { score, total, blank_count: blank, details } = result;
+    const pct = total > 0 ? Math.round((score / total) * 100) : 0;
+    const wrong = total - score - blank;
+    const reviewList = details
+      .map((d, idx) => ({ d, idx }))
+      .filter(({ d }) => d.chosen !== d.correct);
     return (
       <main className="min-h-screen bg-background">
         <div className="mx-auto max-w-2xl px-4 py-8">
@@ -336,7 +338,7 @@ function QuizPage() {
             </p>
             <div className="mt-6 text-5xl font-bold text-primary">
               {score}
-              <span className="text-2xl text-muted-foreground">/{questions.length}</span>
+              <span className="text-2xl text-muted-foreground">/{total}</span>
             </div>
             <p className="mt-2 text-sm font-medium text-muted-foreground">{pct}% düzgün</p>
             <div className="mt-5 grid grid-cols-3 gap-2 text-sm">
@@ -362,24 +364,24 @@ function QuizPage() {
             </p>
           ) : (
           <div className="space-y-3">
-            {reviewList.map((q) => {
-              const i = questions.indexOf(q);
-              const chosen = answers[q.id];
-              const ok = chosen === q.correct_index;
+            {reviewList.map(({ d, idx }) => {
+              const i = idx;
+              const chosen = d.chosen;
+              const ok = chosen === d.correct;
               return (
-                <div key={q.id} className="rounded-2xl border border-border bg-card p-5">
+                <div key={i} className="rounded-2xl border border-border bg-card p-5">
                   <div className="flex items-start justify-between gap-2">
-                    <p className="font-medium text-foreground">{i + 1}. {q.prompt}</p>
+                    <p className="font-medium text-foreground">{i + 1}. {d.prompt}</p>
                     <div className="flex shrink-0 items-center gap-2">
-                      {q.pdf_number != null && (
-                        <span className="rounded-md bg-secondary px-2 py-0.5 text-xs font-semibold text-muted-foreground">PDF #{q.pdf_number}</span>
+                      {d.pdf_number != null && (
+                        <span className="rounded-md bg-secondary px-2 py-0.5 text-xs font-semibold text-muted-foreground">PDF #{d.pdf_number}</span>
                       )}
                       {ok ? <Check className="h-5 w-5 text-success" /> : <XCircle className="h-5 w-5 text-destructive" />}
                     </div>
                   </div>
                   <div className="mt-3 space-y-2">
-                    {q.options.map((o, oi) => {
-                      const isCorrect = oi === q.correct_index;
+                    {d.options.map((o, oi) => {
+                      const isCorrect = oi === d.correct;
                       const isChosen = oi === chosen;
                       return (
                         <div
@@ -399,7 +401,7 @@ function QuizPage() {
                         </div>
                       );
                     })}
-                    {chosen === undefined && (
+                    {chosen === null && (
                       <p className="text-xs font-medium text-muted-foreground">Cavablanmayıb</p>
                     )}
                   </div>
