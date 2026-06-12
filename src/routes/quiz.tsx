@@ -50,6 +50,13 @@ function QuizPage() {
 
   const [config, setConfig] = useState<Config | null>(null);
   const [questions, setQuestions] = useState<QuizQuestion[] | null>(null);
+  const [optionOrders, setOptionOrders] = useState<Record<string, number[]>>({});
+  const [result, setResult] = useState<{
+    score: number;
+    total: number;
+    blank_count: number;
+    details: ResultDetail[];
+  } | null>(null);
   const [loadError, setLoadError] = useState("");
   const [current, setCurrent] = useState(0);
   const [answers, setAnswers] = useState<Record<string, number>>({});
