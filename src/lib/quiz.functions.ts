@@ -842,27 +842,59 @@ export const finishAttempt = createServerFn({ method: "POST" })
         access_key_id: z.string().uuid().nullable().optional(),
         seat_number: z.number().int().min(0).max(100000).nullable().optional(),
         access_key: z.string().max(60).nullable().optional(),
-        score: z.number().int().min(0).max(5000),
-        total: z.number().int().min(0).max(5000),
-        blank_count: z.number().int().min(0).max(5000).default(0),
         attempt_number: z.number().int().min(1).max(1000).default(1),
         started_at: z.string().max(40).nullable().optional(),
-        details: z.array(z.record(z.string(), z.unknown())).max(5000).optional(),
+        answers: z
+          .array(
+            z.object({
+              question_id: z.string().uuid(),
+              chosen: z.number().int().min(0).max(50).nullable(),
+            }),
+          )
+          .max(5000),
       })
       .parse(input),
   )
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    // Score the attempt server-side. The client never receives correct answers
+    // until after submission, preserving exam integrity.
+    const ids = data.answers.map((a) => a.question_id);
+    const chosenMap = new Map(data.answers.map((a) => [a.question_id, a.chosen]));
+    const { data: qs, error: qErr } = await supabaseAdmin
+      .from("questions")
+      .select("id, prompt, options, correct_index, pdf_number")
+      .in("id", ids.length ? ids : ["00000000-0000-0000-0000-000000000000"]);
+    if (qErr) throw new Error(qErr.message);
+    const qById = new Map((qs ?? []).map((q) => [q.id as string, q]));
+    let score = 0;
+    let blank_count = 0;
+    const details = ids.map((id) => {
+      const q = qById.get(id);
+      const opts = Array.isArray(q?.options) ? (q!.options as string[]) : [];
+      const correct = typeof q?.correct_index === "number" ? q!.correct_index : 0;
+      const chosen = chosenMap.get(id) ?? null;
+      if (chosen === null || chosen === undefined) blank_count++;
+      else if (chosen === correct) score++;
+      return {
+        prompt: q?.prompt ?? "",
+        pdf_number: q?.pdf_number ?? null,
+        options: opts,
+        chosen,
+        correct,
+      };
+    });
+    const total = ids.length;
     const { error } = await supabaseAdmin.from("quiz_results").insert({
       assessment_id: data.assessment_id,
       seat_number: data.seat_number ?? 0,
       access_key: data.access_key ?? null,
-      score: data.score,
-      total: data.total,
-      blank_count: data.blank_count,
+      score,
+      total,
+      blank_count,
       attempt_number: data.attempt_number,
       started_at: data.started_at ?? null,
-      details: data.details ?? null,
+      details: details as never,
     } as never);
     if (error) throw new Error(error.message);
     // Mark identity completed and bump attempt count.
@@ -878,7 +910,7 @@ export const finishAttempt = createServerFn({ method: "POST" })
         .update({ completed: true, attempt_count: data.attempt_number } as never)
         .eq("id", data.access_key_id);
     }
-    return { ok: true };
+    return { ok: true, score, total, blank_count, details };
   });
 
 // --- AI extraction helpers -------------------------------------------------
