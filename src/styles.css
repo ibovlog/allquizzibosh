@@ -252,3 +252,44 @@
     text-rendering: optimizeLegibility;
   }
 }
+
+/*
+ * OLD-BROWSER TINTED BACKGROUND FALLBACKS.
+ *
+ * Tailwind generates opacity utilities like `.bg-success/10` as:
+ *     background-color: var(--success);                    <- fallback
+ *     @supports (color-mix) { background-color: color-mix(... 10% ...) }
+ * Browsers shipped with Windows 7 / 8.1 (Chrome <=109, Edge Legacy, older
+ * Firefox) do NOT support color-mix(), so they use the fallback — the FULL
+ * solid color. That makes e.g. `bg-success/10 text-success` render green text
+ * on a green block (invisible until selected). These rules restore a proper
+ * light tint for those exact cases, ONLY on browsers without color-mix.
+ * Modern browsers skip this whole block, so their look is unchanged.
+ */
+@supports not (color: color-mix(in lab, red, red)) {
+  .bg-success\/10 {
+    background-color: #e9f6ed;
+  }
+  .bg-destructive\/10 {
+    background-color: #fde9ea;
+  }
+  .bg-primary\/10 {
+    background-color: #eaeffd;
+  }
+  .bg-primary\/5 {
+    background-color: #f4f7fe;
+  }
+
+  .dark .bg-success\/10 {
+    background-color: #112532;
+  }
+  .dark .bg-destructive\/10 {
+    background-color: #271f31;
+  }
+  .dark .bg-primary\/10 {
+    background-color: #242c3f;
+  }
+  .dark .bg-primary\/5 {
+    background-color: #1a2135;
+  }
+}
