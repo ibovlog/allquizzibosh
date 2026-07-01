@@ -7,6 +7,10 @@
 import { defineConfig } from "@lovable.dev/vite-tanstack-config";
 
 export default defineConfig({
+  // Force-enable the nitro deploy plugin so it emits dist/server/wrangler.json.
+  // On Cloudflare CI there is no "Lovable context", so the plugin would otherwise
+  // skip itself and `wrangler deploy --config dist/server/wrangler.json` fails.
+  nitro: true,
   tanstackStart: {
     // Redirect TanStack Start's bundled server entry to src/server.ts (our SSR error wrapper).
     // nitro/vite builds from this
