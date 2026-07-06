@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite dev",
-    "build": "vite build && rm -rf dist && cp -R .output dist",
+    "build": "vite build",
     "deploy:cloudflare": "npx wrangler deploy --config dist/server/wrangler.json",
     "build:dev": "vite build --mode development",
     "preview": "vite preview",
