@@ -139,17 +139,40 @@ function AdminPage() {
   }
 
   async function doLogin() {
-    if (!token.trim()) { toast.error("Zəhmət olmasa parolu daxil edin."); return; }
+    if (!pwInput.trim()) { toast.error("Zəhmət olmasa şifrəni daxil edin."); return; }
     setLoggingIn(true);
     try {
-      const res = await login({ data: { token } });
-      if (!res.ok) { toast.error("Parol yanlışdır."); return; }
-      await refresh(token);
-      setAuthed(true);
+      const res = await login({ data: { username: userInput.trim(), password: pwInput } });
+      if (!res.ok || !res.token) { toast.error(("reason" in res && res.reason) || "İstifadəçi adı və ya şifrə yanlışdır."); return; }
+      setToken(res.token);
+      setRole(res.role);
+      setCourseName(res.courseName ?? null);
+      if (res.role === "super") {
+        const sd = await fetchSuper({ data: { token: res.token } });
+        setSuperCourses((sd.courses as Array<{ id: string; name: string; is_active: boolean }>) ?? []);
+        setNeedCoursePick(true);
+      } else {
+        await refresh(res.token);
+        setAuthed(true);
+      }
     } catch {
       toast.error("Giriş zamanı xəta baş verdi.");
     } finally {
       setLoggingIn(false);
+    }
+  }
+
+  async function pickCourse(courseId: string) {
+    try {
+      const res = await doEnterCourse({ data: { token, course_id: courseId } });
+      if (!res.ok || !res.token) { toast.error("Kursa keçmək alınmadı."); return; }
+      setToken(res.token);
+      setCourseName(res.courseName ?? null);
+      await refresh(res.token);
+      setNeedCoursePick(false);
+      setAuthed(true);
+    } catch {
+      toast.error("Kursa keçmək alınmadı.");
     }
   }
 
