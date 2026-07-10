@@ -1,63 +1,300 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
-const DEFAULT_ADMIN_PASSWORD = "admin123";
 const NIL_UUID = "00000000-0000-0000-0000-000000000000";
 
-function checkPassword(password: string) {
-  const expected = process.env.ADMIN_PASSWORD || DEFAULT_ADMIN_PASSWORD;
-  return password === expected;
-}
-
+const tok = z.string().min(1).max(4000);
 const pw = z.string().min(1).max(200);
 const optionSchema = z.array(z.string().min(1).max(2000)).min(2).max(8);
 const loginMode = z.enum(["seat", "key", "both"]);
 
-// --- Admin login -----------------------------------------------------------
+// ===========================================================================
+// AUTH / SESSION
+// ===========================================================================
 export const adminLogin = createServerFn({ method: "POST" })
-  .inputValidator((input: unknown) => z.object({ password: pw }).parse(input))
+  .inputValidator((input: unknown) =>
+    z.object({ username: z.string().trim().max(120).optional().default(""), password: pw }).parse(input),
+  )
   .handler(async ({ data }) => {
-    return { ok: checkPassword(data.password) };
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { signSession } = await import("@/lib/auth.server");
+    const { verifyPassword } = await import("@/lib/auth.server");
+
+    const superPw = process.env.ADMIN_PASSWORD || "admin123";
+    // Super admin: correct master password (username ignored / "super"/"admin").
+    const uname = data.username.trim();
+    const looksSuper = uname === "" || uname.toLowerCase() === "super" || uname.toLowerCase() === "admin";
+    if (looksSuper && data.password === superPw) {
+      const token = await signSession({ role: "super", courseId: null });
+      return { ok: true as const, role: "super" as const, token, courseId: null, courseName: null };
+    }
+
+    // Course admin lookup.
+    const { data: admin } = await supabaseAdmin
+      .from("course_admins")
+      .select("id, course_id, password_hash, is_active, username")
+      .ilike("username", uname)
+      .maybeSingle();
+    if (!admin || !admin.is_active) return { ok: false as const, reason: "İstifadəçi adı və ya şifrə yanlışdır." };
+    const good = await verifyPassword(data.password, admin.password_hash);
+    if (!good) return { ok: false as const, reason: "İstifadəçi adı və ya şifrə yanlışdır." };
+
+    const { data: course } = await supabaseAdmin
+      .from("courses")
+      .select("id, name, is_active")
+      .eq("id", admin.course_id)
+      .maybeSingle();
+    if (!course || !course.is_active) return { ok: false as const, reason: "Bu kurs deaktiv edilib." };
+
+    const token = await signSession({ role: "course", courseId: admin.course_id, username: admin.username });
+    return { ok: true as const, role: "course" as const, token, courseId: course.id, courseName: course.name };
   });
 
-// --- Get admin dashboard data ---------------------------------------------
-export const getAdminData = createServerFn({ method: "POST" })
-  .inputValidator((input: unknown) => z.object({ password: pw }).parse(input))
+// Super admin enters / exits a course context (returns a new scoped token).
+export const enterCourse = createServerFn({ method: "POST" })
+  .inputValidator((input: unknown) =>
+    z.object({ token: tok, course_id: z.string().uuid().nullable() }).parse(input),
+  )
   .handler(async ({ data }) => {
-    if (!checkPassword(data.password)) throw new Error("UNAUTHORIZED");
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { requireSuper } = await import("@/lib/tenant.server");
+    const { signSession } = await import("@/lib/auth.server");
+    const { session, supabaseAdmin } = await requireSuper(data.token);
+    let courseName: string | null = null;
+    if (data.course_id) {
+      const { data: c } = await supabaseAdmin
+        .from("courses")
+        .select("name")
+        .eq("id", data.course_id)
+        .maybeSingle();
+      courseName = c?.name ?? null;
+    }
+    const token = await signSession({ role: session.role, courseId: data.course_id, username: session.username });
+    return { ok: true as const, token, courseId: data.course_id, courseName };
+  });
 
-    const [assessments, results, questions, participants, accessKeys, procErrors, problemReports] =
+// ===========================================================================
+// SUPER ADMIN
+// ===========================================================================
+export const getSuperData = createServerFn({ method: "POST" })
+  .inputValidator((input: unknown) => z.object({ token: tok }).parse(input))
+  .handler(async ({ data }) => {
+    const { requireSuper } = await import("@/lib/tenant.server");
+    const { supabaseAdmin } = await requireSuper(data.token);
+
+    const [courses, admins, assessmentCount, participantCount, activeParticipants] = await Promise.all([
+      supabaseAdmin.from("courses").select("id, name, slug, is_active, logo_url, primary_color, login_title, login_subtitle, created_at").order("created_at", { ascending: true }),
+      supabaseAdmin.from("course_admins").select("id, course_id, username, is_active, created_at").order("created_at", { ascending: true }),
+      supabaseAdmin.from("assessments").select("id, course_id"),
+      supabaseAdmin.from("participants").select("id, course_id, completed"),
+      supabaseAdmin.from("access_keys").select("id, course_id, completed"),
+    ]);
+    if (courses.error) throw new Error(courses.error.message);
+
+    const assessments = assessmentCount.data ?? [];
+    const parts = participantCount.data ?? [];
+    const keys = activeParticipants.data ?? [];
+    const totalUsers = parts.length + keys.length;
+    const activeUsers = parts.filter((p) => !p.completed).length + keys.filter((k) => !k.completed).length;
+
+    // Per-course stats
+    const statsByCourse: Record<string, { assessments: number; users: number }> = {};
+    for (const a of assessments) {
+      const cid = (a as { course_id: string | null }).course_id ?? "";
+      statsByCourse[cid] = statsByCourse[cid] || { assessments: 0, users: 0 };
+      statsByCourse[cid].assessments++;
+    }
+    for (const p of parts) {
+      const cid = (p as { course_id: string | null }).course_id ?? "";
+      statsByCourse[cid] = statsByCourse[cid] || { assessments: 0, users: 0 };
+      statsByCourse[cid].users++;
+    }
+    for (const k of keys) {
+      const cid = (k as { course_id: string | null }).course_id ?? "";
+      statsByCourse[cid] = statsByCourse[cid] || { assessments: 0, users: 0 };
+      statsByCourse[cid].users++;
+    }
+
+    return {
+      courses: courses.data ?? [],
+      admins: admins.data ?? [],
+      statsByCourse,
+      totals: {
+        courses: (courses.data ?? []).length,
+        admins: (admins.data ?? []).length,
+        assessments: assessments.length,
+        users: totalUsers,
+        activeUsers,
+      },
+    };
+  });
+
+export const createCourse = createServerFn({ method: "POST" })
+  .inputValidator((input: unknown) =>
+    z.object({
+      token: tok,
+      name: z.string().trim().min(1).max(120),
+      slug: z.string().trim().min(1).max(60).regex(/^[a-z0-9-]+$/, "slug yalnız kiçik hərf, rəqəm və tire ola bilər"),
+    }).parse(input),
+  )
+  .handler(async ({ data }) => {
+    const { requireSuper } = await import("@/lib/tenant.server");
+    const { supabaseAdmin } = await requireSuper(data.token);
+    const { data: row, error } = await supabaseAdmin
+      .from("courses")
+      .insert({ name: data.name, slug: data.slug } as never)
+      .select("id")
+      .single();
+    if (error) {
+      if (error.code === "23505") throw new Error("Bu ad və ya slug artıq mövcuddur.");
+      throw new Error(error.message);
+    }
+    return { id: row.id };
+  });
+
+export const updateCourse = createServerFn({ method: "POST" })
+  .inputValidator((input: unknown) =>
+    z.object({
+      token: tok,
+      id: z.string().uuid(),
+      name: z.string().trim().min(1).max(120).optional(),
+      is_active: z.boolean().optional(),
+      logo_url: z.string().trim().max(1000).nullable().optional(),
+      primary_color: z.string().trim().max(40).nullable().optional(),
+      login_title: z.string().trim().max(160).nullable().optional(),
+      login_subtitle: z.string().trim().max(300).nullable().optional(),
+    }).parse(input),
+  )
+  .handler(async ({ data }) => {
+    const { requireSuper } = await import("@/lib/tenant.server");
+    const { supabaseAdmin } = await requireSuper(data.token);
+    const patch: Record<string, unknown> = {};
+    if (data.name !== undefined) patch.name = data.name;
+    if (data.is_active !== undefined) patch.is_active = data.is_active;
+    if (data.logo_url !== undefined) patch.logo_url = data.logo_url || null;
+    if (data.primary_color !== undefined) patch.primary_color = data.primary_color || null;
+    if (data.login_title !== undefined) patch.login_title = data.login_title || null;
+    if (data.login_subtitle !== undefined) patch.login_subtitle = data.login_subtitle || null;
+    const { error } = await supabaseAdmin.from("courses").update(patch as never).eq("id", data.id);
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
+export const deleteCourse = createServerFn({ method: "POST" })
+  .inputValidator((input: unknown) => z.object({ token: tok, id: z.string().uuid() }).parse(input))
+  .handler(async ({ data }) => {
+    const { requireSuper } = await import("@/lib/tenant.server");
+    const { supabaseAdmin } = await requireSuper(data.token);
+    const { error } = await supabaseAdmin.from("courses").delete().eq("id", data.id);
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
+export const createCourseAdmin = createServerFn({ method: "POST" })
+  .inputValidator((input: unknown) =>
+    z.object({
+      token: tok,
+      course_id: z.string().uuid(),
+      username: z.string().trim().min(3).max(60).regex(/^[a-zA-Z0-9_.-]+$/, "İstifadəçi adı yalnız hərf, rəqəm, _ . - ola bilər"),
+      password: z.string().min(4).max(200),
+    }).parse(input),
+  )
+  .handler(async ({ data }) => {
+    const { requireSuper } = await import("@/lib/tenant.server");
+    const { hashPassword } = await import("@/lib/auth.server");
+    const { supabaseAdmin } = await requireSuper(data.token);
+    const password_hash = await hashPassword(data.password);
+    const { error } = await supabaseAdmin
+      .from("course_admins")
+      .insert({ course_id: data.course_id, username: data.username, password_hash } as never);
+    if (error) {
+      if (error.code === "23505") throw new Error("Bu istifadəçi adı artıq mövcuddur.");
+      throw new Error(error.message);
+    }
+    return { ok: true };
+  });
+
+export const updateCourseAdmin = createServerFn({ method: "POST" })
+  .inputValidator((input: unknown) =>
+    z.object({
+      token: tok,
+      id: z.string().uuid(),
+      username: z.string().trim().min(3).max(60).regex(/^[a-zA-Z0-9_.-]+$/).optional(),
+      password: z.string().min(4).max(200).optional(),
+      is_active: z.boolean().optional(),
+    }).parse(input),
+  )
+  .handler(async ({ data }) => {
+    const { requireSuper } = await import("@/lib/tenant.server");
+    const { hashPassword } = await import("@/lib/auth.server");
+    const { supabaseAdmin } = await requireSuper(data.token);
+    const patch: Record<string, unknown> = {};
+    if (data.username !== undefined) patch.username = data.username;
+    if (data.is_active !== undefined) patch.is_active = data.is_active;
+    if (data.password !== undefined) patch.password_hash = await hashPassword(data.password);
+    const { error } = await supabaseAdmin.from("course_admins").update(patch as never).eq("id", data.id);
+    if (error) {
+      if (error.code === "23505") throw new Error("Bu istifadəçi adı artıq mövcuddur.");
+      throw new Error(error.message);
+    }
+    return { ok: true };
+  });
+
+export const deleteCourseAdmin = createServerFn({ method: "POST" })
+  .inputValidator((input: unknown) => z.object({ token: tok, id: z.string().uuid() }).parse(input))
+  .handler(async ({ data }) => {
+    const { requireSuper } = await import("@/lib/tenant.server");
+    const { supabaseAdmin } = await requireSuper(data.token);
+    const { error } = await supabaseAdmin.from("course_admins").delete().eq("id", data.id);
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
+// ===========================================================================
+// COURSE ADMIN — dashboard data (scoped to course)
+// ===========================================================================
+export const getAdminData = createServerFn({ method: "POST" })
+  .inputValidator((input: unknown) => z.object({ token: tok }).parse(input))
+  .handler(async ({ data }) => {
+    const { requireCourse } = await import("@/lib/tenant.server");
+    const { courseId, supabaseAdmin } = await requireCourse(data.token);
+
+    const [course, assessments, results, questions, participants, accessKeys, procErrors, problemReports] =
       await Promise.all([
+        supabaseAdmin.from("courses").select("id, name, slug, logo_url, primary_color, login_title, login_subtitle").eq("id", courseId).maybeSingle(),
         supabaseAdmin
           .from("assessments")
-          .select(
-            "id, name, description, question_count, order_mode, is_open, login_mode, seat_min, seat_max, resume_after_unblock, shuffle_options, max_attempts, allow_range, created_at",
-          )
+          .select("id, name, description, question_count, order_mode, is_open, login_mode, seat_min, seat_max, resume_after_unblock, shuffle_options, max_attempts, allow_range, created_at")
+          .eq("course_id", courseId)
           .order("created_at", { ascending: false }),
         supabaseAdmin
           .from("quiz_results")
           .select("id, assessment_id, seat_number, score, total, details, attempt_number, started_at, blank_count, access_key, created_at")
+          .eq("course_id", courseId)
           .order("created_at", { ascending: false }),
         supabaseAdmin
           .from("questions")
           .select("id, assessment_id, prompt, options, correct_index, position, pdf_number, source_file")
+          .eq("course_id", courseId)
           .order("position", { ascending: true }),
         supabaseAdmin
           .from("participants")
           .select("id, assessment_id, seat_number, access_key, device_id, blocked, completed, attempt_count, created_at")
+          .eq("course_id", courseId)
           .order("seat_number", { ascending: true }),
         supabaseAdmin
           .from("access_keys")
           .select("id, assessment_id, key_code, device_id, blocked, completed, attempt_count, created_at")
+          .eq("course_id", courseId)
           .order("created_at", { ascending: true }),
         supabaseAdmin
           .from("processing_errors")
           .select("id, assessment_id, file_name, question_number, reason, raw_excerpt, question_id, status, created_at")
+          .eq("course_id", courseId)
           .order("created_at", { ascending: false }),
         supabaseAdmin
           .from("problem_reports")
           .select("id, assessment_id, question_id, pdf_number, question_text, seat_number, access_key, reason, status, created_at")
+          .eq("course_id", courseId)
           .order("created_at", { ascending: false }),
       ]);
 
@@ -70,6 +307,7 @@ export const getAdminData = createServerFn({ method: "POST" })
     if (problemReports.error) throw new Error(problemReports.error.message);
 
     return {
+      course: course.data ?? null,
       assessments: assessments.data ?? [],
       results: results.data ?? [],
       questions: questions.data ?? [],
@@ -80,12 +318,38 @@ export const getAdminData = createServerFn({ method: "POST" })
     };
   });
 
-// --- Assessment CRUD -------------------------------------------------------
+// Course admin updates its own branding.
+export const updateBranding = createServerFn({ method: "POST" })
+  .inputValidator((input: unknown) =>
+    z.object({
+      token: tok,
+      logo_url: z.string().trim().max(1000).nullable().optional(),
+      primary_color: z.string().trim().max(40).nullable().optional(),
+      login_title: z.string().trim().max(160).nullable().optional(),
+      login_subtitle: z.string().trim().max(300).nullable().optional(),
+    }).parse(input),
+  )
+  .handler(async ({ data }) => {
+    const { requireCourse } = await import("@/lib/tenant.server");
+    const { courseId, supabaseAdmin } = await requireCourse(data.token);
+    const patch: Record<string, unknown> = {};
+    if (data.logo_url !== undefined) patch.logo_url = data.logo_url || null;
+    if (data.primary_color !== undefined) patch.primary_color = data.primary_color || null;
+    if (data.login_title !== undefined) patch.login_title = data.login_title || null;
+    if (data.login_subtitle !== undefined) patch.login_subtitle = data.login_subtitle || null;
+    const { error } = await supabaseAdmin.from("courses").update(patch as never).eq("id", courseId);
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
+// ===========================================================================
+// ASSESSMENT CRUD (course scoped)
+// ===========================================================================
 export const createAssessment = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) =>
     z
       .object({
-        password: pw,
+        token: tok,
         name: z.string().trim().min(1).max(120),
         description: z.string().trim().max(500).optional().default(""),
         question_count: z.number().int().min(1).max(1000).default(20),
@@ -100,11 +364,12 @@ export const createAssessment = createServerFn({ method: "POST" })
       .parse(input),
   )
   .handler(async ({ data }) => {
-    if (!checkPassword(data.password)) throw new Error("UNAUTHORIZED");
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { requireCourse } = await import("@/lib/tenant.server");
+    const { courseId, supabaseAdmin } = await requireCourse(data.token);
     const { data: row, error } = await supabaseAdmin
       .from("assessments")
       .insert({
+        course_id: courseId,
         name: data.name,
         description: data.description || null,
         question_count: data.question_count,
@@ -129,7 +394,7 @@ export const updateAssessment = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) =>
     z
       .object({
-        password: pw,
+        token: tok,
         id: z.string().uuid(),
         name: z.string().trim().min(1).max(120).optional(),
         description: z.string().trim().max(500).optional(),
@@ -147,8 +412,8 @@ export const updateAssessment = createServerFn({ method: "POST" })
       .parse(input),
   )
   .handler(async ({ data }) => {
-    if (!checkPassword(data.password)) throw new Error("UNAUTHORIZED");
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { requireCourse } = await import("@/lib/tenant.server");
+    const { courseId, supabaseAdmin } = await requireCourse(data.token);
     const patch: Record<string, unknown> = {};
     if (data.name !== undefined) patch.name = data.name;
     if (data.description !== undefined) patch.description = data.description || null;
@@ -162,29 +427,29 @@ export const updateAssessment = createServerFn({ method: "POST" })
     if (data.shuffle_options !== undefined) patch.shuffle_options = data.shuffle_options;
     if (data.max_attempts !== undefined) patch.max_attempts = data.max_attempts;
     if (data.allow_range !== undefined) patch.allow_range = data.allow_range;
-    const { error } = await supabaseAdmin.from("assessments").update(patch as never).eq("id", data.id);
+    const { error } = await supabaseAdmin.from("assessments").update(patch as never).eq("id", data.id).eq("course_id", courseId);
     if (error) throw new Error(error.message);
     return { ok: true };
   });
 
 export const deleteAssessment = createServerFn({ method: "POST" })
-  .inputValidator((input: unknown) =>
-    z.object({ password: pw, id: z.string().uuid() }).parse(input),
-  )
+  .inputValidator((input: unknown) => z.object({ token: tok, id: z.string().uuid() }).parse(input))
   .handler(async ({ data }) => {
-    if (!checkPassword(data.password)) throw new Error("UNAUTHORIZED");
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { error } = await supabaseAdmin.from("assessments").delete().eq("id", data.id);
+    const { requireCourse } = await import("@/lib/tenant.server");
+    const { courseId, supabaseAdmin } = await requireCourse(data.token);
+    const { error } = await supabaseAdmin.from("assessments").delete().eq("id", data.id).eq("course_id", courseId);
     if (error) throw new Error(error.message);
     return { ok: true };
   });
 
-// --- Question CRUD ---------------------------------------------------------
+// ===========================================================================
+// QUESTION CRUD (course scoped)
+// ===========================================================================
 export const saveQuestion = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) =>
     z
       .object({
-        password: pw,
+        token: tok,
         id: z.string().uuid().optional(),
         assessment_id: z.string().uuid(),
         prompt: z.string().trim().min(1).max(4000),
@@ -196,8 +461,8 @@ export const saveQuestion = createServerFn({ method: "POST" })
       .parse(input),
   )
   .handler(async ({ data }) => {
-    if (!checkPassword(data.password)) throw new Error("UNAUTHORIZED");
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { requireCourse } = await import("@/lib/tenant.server");
+    const { courseId, supabaseAdmin } = await requireCourse(data.token);
     const correct = Math.min(data.correct_index, data.options.length - 1);
 
     if (data.id) {
@@ -207,14 +472,14 @@ export const saveQuestion = createServerFn({ method: "POST" })
         correct_index: correct,
       };
       if (data.pdf_number !== undefined) patch.pdf_number = data.pdf_number;
-      const { error } = await supabaseAdmin.from("questions").update(patch as never).eq("id", data.id);
+      const { error } = await supabaseAdmin.from("questions").update(patch as never).eq("id", data.id).eq("course_id", courseId);
       if (error) throw new Error(error.message);
-      // Editing a question auto-clears related problem reports and processing errors.
-      await supabaseAdmin.from("problem_reports").delete().eq("question_id", data.id);
+      await supabaseAdmin.from("problem_reports").delete().eq("question_id", data.id).eq("course_id", courseId);
       await supabaseAdmin
         .from("processing_errors")
         .update({ status: "resolved" } as never)
-        .eq("question_id", data.id);
+        .eq("question_id", data.id)
+        .eq("course_id", courseId);
       return { ok: true };
     }
 
@@ -243,106 +508,85 @@ export const saveQuestion = createServerFn({ method: "POST" })
       }
     }
     const { error } = await supabaseAdmin.from("questions").insert({
+      course_id: courseId,
       assessment_id: data.assessment_id,
       prompt: data.prompt,
       options: data.options,
       correct_index: correct,
       pdf_number: data.pdf_number ?? null,
       position,
-    });
+    } as never);
     if (error) throw new Error(error.message);
     return { ok: true };
   });
 
 export const deleteQuestion = createServerFn({ method: "POST" })
-  .inputValidator((input: unknown) =>
-    z.object({ password: pw, id: z.string().uuid() }).parse(input),
-  )
+  .inputValidator((input: unknown) => z.object({ token: tok, id: z.string().uuid() }).parse(input))
   .handler(async ({ data }) => {
-    if (!checkPassword(data.password)) throw new Error("UNAUTHORIZED");
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { error } = await supabaseAdmin.from("questions").delete().eq("id", data.id);
+    const { requireCourse } = await import("@/lib/tenant.server");
+    const { courseId, supabaseAdmin } = await requireCourse(data.token);
+    const { error } = await supabaseAdmin.from("questions").delete().eq("id", data.id).eq("course_id", courseId);
     if (error) throw new Error(error.message);
     return { ok: true };
   });
 
 export const clearQuestions = createServerFn({ method: "POST" })
-  .inputValidator((input: unknown) =>
-    z.object({ password: pw, assessment_id: z.string().uuid() }).parse(input),
-  )
+  .inputValidator((input: unknown) => z.object({ token: tok, assessment_id: z.string().uuid() }).parse(input))
   .handler(async ({ data }) => {
-    if (!checkPassword(data.password)) throw new Error("UNAUTHORIZED");
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { requireCourse } = await import("@/lib/tenant.server");
+    const { courseId, supabaseAdmin } = await requireCourse(data.token);
     const { error } = await supabaseAdmin
       .from("questions")
       .delete()
-      .eq("assessment_id", data.assessment_id);
+      .eq("assessment_id", data.assessment_id)
+      .eq("course_id", courseId);
     if (error) throw new Error(error.message);
     return { ok: true };
   });
 
 // --- Clear results ---------------------------------------------------------
 export const clearResults = createServerFn({ method: "POST" })
-  .inputValidator((input: unknown) =>
-    z.object({ password: pw, assessment_id: z.string().uuid().optional() }).parse(input),
-  )
+  .inputValidator((input: unknown) => z.object({ token: tok, assessment_id: z.string().uuid().optional() }).parse(input))
   .handler(async ({ data }) => {
-    if (!checkPassword(data.password)) throw new Error("UNAUTHORIZED");
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    let q = supabaseAdmin.from("quiz_results").delete();
-    q = data.assessment_id ? q.eq("assessment_id", data.assessment_id) : q.neq("id", NIL_UUID);
+    const { requireCourse } = await import("@/lib/tenant.server");
+    const { courseId, supabaseAdmin } = await requireCourse(data.token);
+    let q = supabaseAdmin.from("quiz_results").delete().eq("course_id", courseId);
+    if (data.assessment_id) q = q.eq("assessment_id", data.assessment_id);
     const { error } = await q;
     if (error) throw new Error(error.message);
     return { ok: true };
   });
 
-// --- Participant: block / unblock / reset / change seat --------------------
+// ===========================================================================
+// PARTICIPANTS (course scoped)
+// ===========================================================================
 export const setParticipantBlocked = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) =>
-    z
-      .object({
-        password: pw,
-        id: z.string().uuid(),
-        blocked: z.boolean(),
-        resume: z.boolean().optional(),
-      })
-      .parse(input),
+    z.object({ token: tok, id: z.string().uuid(), blocked: z.boolean(), resume: z.boolean().optional() }).parse(input),
   )
   .handler(async ({ data }) => {
-    if (!checkPassword(data.password)) throw new Error("UNAUTHORIZED");
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { requireCourse } = await import("@/lib/tenant.server");
+    const { courseId, supabaseAdmin } = await requireCourse(data.token);
     const patch: Record<string, unknown> = { blocked: data.blocked };
-    // When unblocking without resume, clear saved progress so they restart.
     if (!data.blocked && data.resume === false) {
       patch.current_index = 0;
       patch.answers = {};
     }
-    const { error } = await supabaseAdmin.from("participants").update(patch as never).eq("id", data.id);
+    const { error } = await supabaseAdmin.from("participants").update(patch as never).eq("id", data.id).eq("course_id", courseId);
     if (error) throw new Error(error.message);
     return { ok: true };
   });
 
 export const resetParticipant = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) =>
-    z
-      .object({
-        password: pw,
-        id: z.string().uuid(),
-        new_seat: z.number().int().min(1).max(100000).optional(),
-      })
-      .parse(input),
+    z.object({ token: tok, id: z.string().uuid(), new_seat: z.number().int().min(1).max(100000).optional() }).parse(input),
   )
   .handler(async ({ data }) => {
-    if (!checkPassword(data.password)) throw new Error("UNAUTHORIZED");
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const patch: Record<string, unknown> = {
-      device_id: null,
-      blocked: false,
-      current_index: 0,
-      answers: {},
-    };
+    const { requireCourse } = await import("@/lib/tenant.server");
+    const { courseId, supabaseAdmin } = await requireCourse(data.token);
+    const patch: Record<string, unknown> = { device_id: null, blocked: false, current_index: 0, answers: {} };
     if (data.new_seat !== undefined) patch.seat_number = data.new_seat;
-    const { error } = await supabaseAdmin.from("participants").update(patch as never).eq("id", data.id);
+    const { error } = await supabaseAdmin.from("participants").update(patch as never).eq("id", data.id).eq("course_id", courseId);
     if (error) {
       if (error.code === "23505") throw new Error("Bu sıra nömrəsi artıq mövcuddur.");
       throw new Error(error.message);
@@ -351,18 +595,18 @@ export const resetParticipant = createServerFn({ method: "POST" })
   });
 
 export const deleteParticipant = createServerFn({ method: "POST" })
-  .inputValidator((input: unknown) =>
-    z.object({ password: pw, id: z.string().uuid() }).parse(input),
-  )
+  .inputValidator((input: unknown) => z.object({ token: tok, id: z.string().uuid() }).parse(input))
   .handler(async ({ data }) => {
-    if (!checkPassword(data.password)) throw new Error("UNAUTHORIZED");
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { error } = await supabaseAdmin.from("participants").delete().eq("id", data.id);
+    const { requireCourse } = await import("@/lib/tenant.server");
+    const { courseId, supabaseAdmin } = await requireCourse(data.token);
+    const { error } = await supabaseAdmin.from("participants").delete().eq("id", data.id).eq("course_id", courseId);
     if (error) throw new Error(error.message);
     return { ok: true };
   });
 
-// --- Access keys -----------------------------------------------------------
+// ===========================================================================
+// ACCESS KEYS (course scoped)
+// ===========================================================================
 function randomKey() {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   let s = "";
@@ -374,7 +618,7 @@ export const createAccessKeys = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) =>
     z
       .object({
-        password: pw,
+        token: tok,
         assessment_id: z.string().uuid(),
         count: z.number().int().min(1).max(500).optional(),
         keys: z.array(z.string().trim().min(1).max(60)).max(500).optional(),
@@ -382,8 +626,8 @@ export const createAccessKeys = createServerFn({ method: "POST" })
       .parse(input),
   )
   .handler(async ({ data }) => {
-    if (!checkPassword(data.password)) throw new Error("UNAUTHORIZED");
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { requireCourse } = await import("@/lib/tenant.server");
+    const { courseId, supabaseAdmin } = await requireCourse(data.token);
     let codes: string[] = [];
     if (data.keys && data.keys.length > 0) {
       codes = data.keys.map((k) => k.trim()).filter(Boolean);
@@ -393,8 +637,8 @@ export const createAccessKeys = createServerFn({ method: "POST" })
       while (set.size < n) set.add(randomKey());
       codes = [...set];
     }
-    const rows = codes.map((key_code) => ({ assessment_id: data.assessment_id, key_code }));
-    const { error } = await supabaseAdmin.from("access_keys").upsert(rows, {
+    const rows = codes.map((key_code) => ({ course_id: courseId, assessment_id: data.assessment_id, key_code }));
+    const { error } = await supabaseAdmin.from("access_keys").upsert(rows as never, {
       onConflict: "assessment_id,key_code",
       ignoreDuplicates: true,
     });
@@ -404,91 +648,83 @@ export const createAccessKeys = createServerFn({ method: "POST" })
 
 export const setAccessKeyBlocked = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) =>
-    z
-      .object({
-        password: pw,
-        id: z.string().uuid(),
-        blocked: z.boolean(),
-        resume: z.boolean().optional(),
-      })
-      .parse(input),
+    z.object({ token: tok, id: z.string().uuid(), blocked: z.boolean(), resume: z.boolean().optional() }).parse(input),
   )
   .handler(async ({ data }) => {
-    if (!checkPassword(data.password)) throw new Error("UNAUTHORIZED");
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { requireCourse } = await import("@/lib/tenant.server");
+    const { courseId, supabaseAdmin } = await requireCourse(data.token);
     const patch: Record<string, unknown> = { blocked: data.blocked };
     if (!data.blocked && data.resume === false) {
       patch.current_index = 0;
       patch.answers = {};
     }
-    const { error } = await supabaseAdmin.from("access_keys").update(patch as never).eq("id", data.id);
+    const { error } = await supabaseAdmin.from("access_keys").update(patch as never).eq("id", data.id).eq("course_id", courseId);
     if (error) throw new Error(error.message);
     return { ok: true };
   });
 
 export const resetAccessKey = createServerFn({ method: "POST" })
-  .inputValidator((input: unknown) =>
-    z.object({ password: pw, id: z.string().uuid() }).parse(input),
-  )
+  .inputValidator((input: unknown) => z.object({ token: tok, id: z.string().uuid() }).parse(input))
   .handler(async ({ data }) => {
-    if (!checkPassword(data.password)) throw new Error("UNAUTHORIZED");
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { requireCourse } = await import("@/lib/tenant.server");
+    const { courseId, supabaseAdmin } = await requireCourse(data.token);
     const { error } = await supabaseAdmin
       .from("access_keys")
       .update({ device_id: null, blocked: false, current_index: 0, answers: {} })
-      .eq("id", data.id);
+      .eq("id", data.id)
+      .eq("course_id", courseId);
     if (error) throw new Error(error.message);
     return { ok: true };
   });
 
 export const deleteAccessKey = createServerFn({ method: "POST" })
-  .inputValidator((input: unknown) =>
-    z.object({ password: pw, id: z.string().uuid() }).parse(input),
-  )
+  .inputValidator((input: unknown) => z.object({ token: tok, id: z.string().uuid() }).parse(input))
   .handler(async ({ data }) => {
-    if (!checkPassword(data.password)) throw new Error("UNAUTHORIZED");
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { error } = await supabaseAdmin.from("access_keys").delete().eq("id", data.id);
+    const { requireCourse } = await import("@/lib/tenant.server");
+    const { courseId, supabaseAdmin } = await requireCourse(data.token);
+    const { error } = await supabaseAdmin.from("access_keys").delete().eq("id", data.id).eq("course_id", courseId);
     if (error) throw new Error(error.message);
     return { ok: true };
   });
 
-// --- Processing errors -----------------------------------------------------
+// ===========================================================================
+// PROCESSING ERRORS (course scoped)
+// ===========================================================================
 export const resolveProcessingError = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) =>
-    z
-      .object({ password: pw, id: z.string().uuid(), status: z.enum(["pending", "resolved"]) })
-      .parse(input),
+    z.object({ token: tok, id: z.string().uuid(), status: z.enum(["pending", "resolved"]) }).parse(input),
   )
   .handler(async ({ data }) => {
-    if (!checkPassword(data.password)) throw new Error("UNAUTHORIZED");
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { requireCourse } = await import("@/lib/tenant.server");
+    const { courseId, supabaseAdmin } = await requireCourse(data.token);
     const { error } = await supabaseAdmin
       .from("processing_errors")
       .update({ status: data.status })
-      .eq("id", data.id);
+      .eq("id", data.id)
+      .eq("course_id", courseId);
     if (error) throw new Error(error.message);
     return { ok: true };
   });
 
 export const deleteProcessingError = createServerFn({ method: "POST" })
-  .inputValidator((input: unknown) =>
-    z.object({ password: pw, id: z.string().uuid() }).parse(input),
-  )
+  .inputValidator((input: unknown) => z.object({ token: tok, id: z.string().uuid() }).parse(input))
   .handler(async ({ data }) => {
-    if (!checkPassword(data.password)) throw new Error("UNAUTHORIZED");
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { error } = await supabaseAdmin.from("processing_errors").delete().eq("id", data.id);
+    const { requireCourse } = await import("@/lib/tenant.server");
+    const { courseId, supabaseAdmin } = await requireCourse(data.token);
+    const { error } = await supabaseAdmin.from("processing_errors").delete().eq("id", data.id).eq("course_id", courseId);
     if (error) throw new Error(error.message);
     return { ok: true };
   });
 
-// --- Join (device-locked) — called by students -----------------------------
+// ===========================================================================
+// STUDENT — join (device-locked)
+// ===========================================================================
 export const joinQuiz = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) =>
     z
       .object({
         assessment_name: z.string().trim().min(1).max(120),
+        course_slug: z.string().trim().max(60).nullable().optional(),
         seat_number: z.number().int().min(1).max(100000).nullable().optional(),
         access_key: z.string().trim().min(1).max(60).nullable().optional(),
         device_id: z.string().min(8).max(100),
@@ -497,28 +733,46 @@ export const joinQuiz = createServerFn({ method: "POST" })
   )
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data: assessment } = await supabaseAdmin
+
+    // Resolve course context (optional slug narrows to one course).
+    let courseFilterId: string | null = null;
+    if (data.course_slug) {
+      const { data: c } = await supabaseAdmin
+        .from("courses")
+        .select("id, is_active")
+        .ilike("slug", data.course_slug)
+        .maybeSingle();
+      if (!c || !c.is_active) return { ok: false as const, reason: "Kurs tapılmadı və ya deaktivdir." };
+      courseFilterId = c.id;
+    }
+
+    let aq = supabaseAdmin
       .from("assessments")
-      .select("id, name, question_count, order_mode, is_open, login_mode, seat_min, seat_max, shuffle_options, max_attempts, allow_range")
-      .ilike("name", data.assessment_name)
-      .maybeSingle();
+      .select("id, course_id, name, question_count, order_mode, is_open, login_mode, seat_min, seat_max, shuffle_options, max_attempts, allow_range")
+      .ilike("name", data.assessment_name);
+    if (courseFilterId) aq = aq.eq("course_id", courseFilterId);
+    const { data: assessment } = await aq.maybeSingle();
     if (!assessment) return { ok: false as const, reason: "Bu adda assessment tapılmadı." };
-    if (!assessment.is_open)
-      return { ok: false as const, reason: "Bu assessment hazırda bağlıdır." };
+    if (!assessment.is_open) return { ok: false as const, reason: "Bu assessment hazırda bağlıdır." };
+
+    const courseId = (assessment as { course_id: string }).course_id;
+    // Ensure course active.
+    const { data: courseRow } = await supabaseAdmin.from("courses").select("is_active").eq("id", courseId).maybeSingle();
+    if (courseRow && courseRow.is_active === false)
+      return { ok: false as const, reason: "Bu kurs deaktiv edilib." };
 
     const mode = assessment.login_mode as "seat" | "key" | "both";
     const needSeat = mode === "seat" || mode === "both";
     const needKey = mode === "key" || mode === "both";
 
-    if (needSeat && (data.seat_number == null))
+    if (needSeat && data.seat_number == null)
       return { ok: false as const, reason: "Sıra nömrəsini daxil edin." };
-    if (needKey && (!data.access_key))
+    if (needKey && !data.access_key)
       return { ok: false as const, reason: "Giriş açarını daxil edin." };
 
     const maxAttempts = (assessment as { max_attempts?: number }).max_attempts ?? 0;
     const shuffleOptions = (assessment as { shuffle_options?: boolean }).shuffle_options ?? true;
 
-    // --- Device cross-lock: a device may only ever be used by ONE identity ---
     const { data: devSeats } = await supabaseAdmin
       .from("participants")
       .select("seat_number")
@@ -552,7 +806,6 @@ export const joinQuiz = createServerFn({ method: "POST" })
     let resumeAnswers: Record<string, number> = {};
     let attemptNumber = 1;
 
-    // --- Seat validation + device lock ---
     if (needSeat) {
       const seat = data.seat_number as number;
       if (seat < assessment.seat_min || seat > assessment.seat_max) {
@@ -571,10 +824,7 @@ export const joinQuiz = createServerFn({ method: "POST" })
         if (existing.blocked)
           return { ok: false as const, reason: "Girişiniz bloklanıb. Adminlə əlaqə saxlayın." };
         if (!existing.device_id) {
-          await supabaseAdmin
-            .from("participants")
-            .update({ device_id: data.device_id })
-            .eq("id", existing.id);
+          await supabaseAdmin.from("participants").update({ device_id: data.device_id }).eq("id", existing.id);
         } else if (existing.device_id !== data.device_id) {
           return { ok: false as const, reason: "Bu sıra nömrəsi başqa cihaza bağlıdır." };
         }
@@ -582,7 +832,6 @@ export const joinQuiz = createServerFn({ method: "POST" })
         const done = (existing as { completed?: boolean }).completed ?? false;
         const usedAttempts = (existing as { attempt_count?: number }).attempt_count ?? 0;
         if (done) {
-          // Previous attempt finished — start a fresh attempt.
           if (maxAttempts > 0 && usedAttempts >= maxAttempts) {
             return { ok: false as const, reason: `Cəhd limiti dolub (${maxAttempts}).` };
           }
@@ -601,11 +850,12 @@ export const joinQuiz = createServerFn({ method: "POST" })
         const { data: ins, error } = await supabaseAdmin
           .from("participants")
           .insert({
+            course_id: courseId,
             assessment_id: assessment.id,
             seat_number: seat,
             access_key: data.access_key ?? null,
             device_id: data.device_id,
-          })
+          } as never)
           .select("id")
           .single();
         if (error) {
@@ -617,7 +867,6 @@ export const joinQuiz = createServerFn({ method: "POST" })
       }
     }
 
-    // --- Access key validation + device lock ---
     let accessKeyId: string | null = null;
     if (needKey) {
       const code = (data.access_key as string).trim();
@@ -631,10 +880,7 @@ export const joinQuiz = createServerFn({ method: "POST" })
       if (keyRow.blocked)
         return { ok: false as const, reason: "Bu açar bloklanıb. Adminlə əlaqə saxlayın." };
       if (!keyRow.device_id) {
-        await supabaseAdmin
-          .from("access_keys")
-          .update({ device_id: data.device_id })
-          .eq("id", keyRow.id);
+        await supabaseAdmin.from("access_keys").update({ device_id: data.device_id }).eq("id", keyRow.id);
       } else if (keyRow.device_id !== data.device_id) {
         return { ok: false as const, reason: "Bu açar başqa cihaza bağlıdır." };
       }
@@ -680,7 +926,6 @@ export const joinQuiz = createServerFn({ method: "POST" })
     };
   });
 
-// --- Save student progress (resume support) --------------------------------
 export const saveProgress = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) =>
     z
@@ -704,7 +949,6 @@ export const saveProgress = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
-// --- Check live block status (polling fallback) ----------------------------
 export const checkBlocked = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) =>
     z
@@ -736,12 +980,14 @@ export const checkBlocked = createServerFn({ method: "POST" })
     return { blocked };
   });
 
-// --- Send realtime message -------------------------------------------------
+// ===========================================================================
+// MESSAGES (admin, course scoped) + reports (student)
+// ===========================================================================
 export const sendMessage = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) =>
     z
       .object({
-        password: pw,
+        token: tok,
         assessment_id: z.string().uuid().nullable().optional(),
         seat_number: z.number().int().min(1).max(100000).nullable().optional(),
         body: z.string().trim().min(1).max(1000),
@@ -750,19 +996,19 @@ export const sendMessage = createServerFn({ method: "POST" })
       .parse(input),
   )
   .handler(async ({ data }) => {
-    if (!checkPassword(data.password)) throw new Error("UNAUTHORIZED");
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { requireCourse } = await import("@/lib/tenant.server");
+    const { courseId, supabaseAdmin } = await requireCourse(data.token);
     const { error } = await supabaseAdmin.from("admin_messages").insert({
+      course_id: courseId,
       assessment_id: data.assessment_id ?? null,
       seat_number: data.seat_number ?? null,
       body: data.body,
       kind: data.kind,
-    });
+    } as never);
     if (error) throw new Error(error.message);
     return { ok: true };
   });
 
-// --- Report a problem (student) -> admin message ---------------------------
 export const reportProblem = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) =>
     z
@@ -779,8 +1025,10 @@ export const reportProblem = createServerFn({ method: "POST" })
   )
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    // Persist a structured problem report for the admin "Problems" tab.
+    const { data: a } = await supabaseAdmin.from("assessments").select("course_id").eq("id", data.assessment_id).maybeSingle();
+    const courseId = (a as { course_id?: string } | null)?.course_id ?? null;
     await supabaseAdmin.from("problem_reports").insert({
+      course_id: courseId,
       assessment_id: data.assessment_id,
       question_id: data.question_id ?? null,
       pdf_number: data.pdf_number ?? null,
@@ -789,50 +1037,48 @@ export const reportProblem = createServerFn({ method: "POST" })
       access_key: data.access_key ?? null,
       reason: data.body,
     } as never);
-    // Also send a live notification to the admin message feed.
     const prefix = data.pdf_number != null ? `[PDF #${data.pdf_number}] ` : "";
     const seat = data.seat_number != null ? `(Sıra #${data.seat_number}) ` : "";
     const { error } = await supabaseAdmin.from("admin_messages").insert({
+      course_id: courseId,
       assessment_id: data.assessment_id,
       seat_number: null,
       body: `🚩 İstifadəçidən bildiriş ${seat}${prefix}${data.body}`,
       kind: "warning",
-    });
+    } as never);
     if (error) throw new Error(error.message);
     return { ok: true };
   });
 
-// --- Problem reports (admin) ----------------------------------------------
 export const resolveProblemReport = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) =>
-    z
-      .object({ password: pw, id: z.string().uuid(), status: z.enum(["pending", "resolved"]) })
-      .parse(input),
+    z.object({ token: tok, id: z.string().uuid(), status: z.enum(["pending", "resolved"]) }).parse(input),
   )
   .handler(async ({ data }) => {
-    if (!checkPassword(data.password)) throw new Error("UNAUTHORIZED");
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { requireCourse } = await import("@/lib/tenant.server");
+    const { courseId, supabaseAdmin } = await requireCourse(data.token);
     const { error } = await supabaseAdmin
       .from("problem_reports")
       .update({ status: data.status } as never)
-      .eq("id", data.id);
+      .eq("id", data.id)
+      .eq("course_id", courseId);
     if (error) throw new Error(error.message);
     return { ok: true };
   });
 
 export const deleteProblemReport = createServerFn({ method: "POST" })
-  .inputValidator((input: unknown) =>
-    z.object({ password: pw, id: z.string().uuid() }).parse(input),
-  )
+  .inputValidator((input: unknown) => z.object({ token: tok, id: z.string().uuid() }).parse(input))
   .handler(async ({ data }) => {
-    if (!checkPassword(data.password)) throw new Error("UNAUTHORIZED");
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { error } = await supabaseAdmin.from("problem_reports").delete().eq("id", data.id);
+    const { requireCourse } = await import("@/lib/tenant.server");
+    const { courseId, supabaseAdmin } = await requireCourse(data.token);
+    const { error } = await supabaseAdmin.from("problem_reports").delete().eq("id", data.id).eq("course_id", courseId);
     if (error) throw new Error(error.message);
     return { ok: true };
   });
 
-// --- Finish an attempt: record result + mark completed ----------------------
+// ===========================================================================
+// FINISH ATTEMPT (student)
+// ===========================================================================
 export const finishAttempt = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) =>
     z
@@ -857,14 +1103,15 @@ export const finishAttempt = createServerFn({ method: "POST" })
   )
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    // Score the attempt server-side. The client never receives correct answers
-    // until after submission, preserving exam integrity.
-    const ids = data.answers.map((a) => a.question_id);
-    const chosenMap = new Map(data.answers.map((a) => [a.question_id, a.chosen]));
+    const { data: a } = await supabaseAdmin.from("assessments").select("course_id").eq("id", data.assessment_id).maybeSingle();
+    const courseId = (a as { course_id?: string } | null)?.course_id ?? null;
+
+    const ids = data.answers.map((a2) => a2.question_id);
+    const chosenMap = new Map(data.answers.map((a2) => [a2.question_id, a2.chosen]));
     const { data: qs, error: qErr } = await supabaseAdmin
       .from("questions")
       .select("id, prompt, options, correct_index, pdf_number")
-      .in("id", ids.length ? ids : ["00000000-0000-0000-0000-000000000000"]);
+      .in("id", ids.length ? ids : [NIL_UUID]);
     if (qErr) throw new Error(qErr.message);
     const qById = new Map((qs ?? []).map((q) => [q.id as string, q]));
     let score = 0;
@@ -876,16 +1123,11 @@ export const finishAttempt = createServerFn({ method: "POST" })
       const chosen = chosenMap.get(id) ?? null;
       if (chosen === null || chosen === undefined) blank_count++;
       else if (chosen === correct) score++;
-      return {
-        prompt: q?.prompt ?? "",
-        pdf_number: q?.pdf_number ?? null,
-        options: opts,
-        chosen,
-        correct,
-      };
+      return { prompt: q?.prompt ?? "", pdf_number: q?.pdf_number ?? null, options: opts, chosen, correct };
     });
     const total = ids.length;
     const { error } = await supabaseAdmin.from("quiz_results").insert({
+      course_id: courseId,
       assessment_id: data.assessment_id,
       seat_number: data.seat_number ?? 0,
       access_key: data.access_key ?? null,
@@ -897,7 +1139,6 @@ export const finishAttempt = createServerFn({ method: "POST" })
       details: details as never,
     } as never);
     if (error) throw new Error(error.message);
-    // Mark identity completed and bump attempt count.
     if (data.participant_id) {
       await supabaseAdmin
         .from("participants")
@@ -913,7 +1154,9 @@ export const finishAttempt = createServerFn({ method: "POST" })
     return { ok: true, score, total, blank_count, details };
   });
 
-// --- AI extraction helpers -------------------------------------------------
+// ===========================================================================
+// AI EXTRACTION
+// ===========================================================================
 type ExtractedQ = {
   prompt: string;
   options: string[];
@@ -958,7 +1201,7 @@ function parseChunk(parsed: unknown): { good: ExtractedQ[]; issues: { pdf_number
   const issues: { pdf_number: number | null; reason: string; excerpt: string }[] = [];
   const arr =
     parsed && typeof parsed === "object" && Array.isArray((parsed as { questions?: unknown }).questions)
-      ? ((parsed as { questions: unknown[] }).questions)
+      ? (parsed as { questions: unknown[] }).questions
       : [];
   for (const item of arr) {
     const q = item as Partial<ExtractedQ>;
@@ -993,12 +1236,11 @@ function chunkArray<T>(arr: T[], size: number): T[][] {
   return out;
 }
 
-// --- Extract quiz from uploaded PDF images or document text ----------------
 export const extractQuiz = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) =>
     z
       .object({
-        password: pw,
+        token: tok,
         assessment_id: z.string().uuid(),
         source_file: z.string().max(300).optional().default(""),
         images: z.array(z.string().min(1)).max(60).optional().default([]),
@@ -1008,14 +1250,13 @@ export const extractQuiz = createServerFn({ method: "POST" })
       .parse(input),
   )
   .handler(async ({ data }) => {
-    if (!checkPassword(data.password)) throw new Error("UNAUTHORIZED");
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { requireCourse } = await import("@/lib/tenant.server");
+    const { courseId, supabaseAdmin } = await requireCourse(data.token);
 
     const allGood: ExtractedQ[] = [];
     const allIssues: { pdf_number: number | null; reason: string; excerpt: string }[] = [];
 
     if (data.images.length > 0) {
-      // batch pages (5 per call) for accuracy on big PDFs
       const batches = chunkArray(data.images, 5);
       for (const batch of batches) {
         try {
@@ -1030,7 +1271,6 @@ export const extractQuiz = createServerFn({ method: "POST" })
         }
       }
     } else if (data.text.trim()) {
-      // chunk long text by ~12000 chars on blank lines
       const text = data.text;
       const chunks: string[] = [];
       const size = 12000;
@@ -1050,16 +1290,16 @@ export const extractQuiz = createServerFn({ method: "POST" })
     }
 
     if (allGood.length === 0) {
-      // still log the issues so admin sees them
       if (allIssues.length > 0) {
         await supabaseAdmin.from("processing_errors").insert(
           allIssues.map((i) => ({
+            course_id: courseId,
             assessment_id: data.assessment_id,
             file_name: data.source_file || null,
             question_number: i.pdf_number,
             reason: i.reason,
             raw_excerpt: i.excerpt || null,
-          })),
+          })) as never,
         );
       }
       throw new Error("Sənəddən sual çıxarılmadı. Daha aydın fayl yoxlayın.");
@@ -1067,8 +1307,8 @@ export const extractQuiz = createServerFn({ method: "POST" })
 
     let offset = 0;
     if (data.replace) {
-      await supabaseAdmin.from("questions").delete().eq("assessment_id", data.assessment_id);
-      await supabaseAdmin.from("processing_errors").delete().eq("assessment_id", data.assessment_id);
+      await supabaseAdmin.from("questions").delete().eq("assessment_id", data.assessment_id).eq("course_id", courseId);
+      await supabaseAdmin.from("processing_errors").delete().eq("assessment_id", data.assessment_id).eq("course_id", courseId);
     } else {
       const { count } = await supabaseAdmin
         .from("questions")
@@ -1078,6 +1318,7 @@ export const extractQuiz = createServerFn({ method: "POST" })
     }
 
     const rows = allGood.map((q, i) => ({
+      course_id: courseId,
       assessment_id: data.assessment_id,
       prompt: q.prompt,
       options: q.options,
@@ -1087,18 +1328,19 @@ export const extractQuiz = createServerFn({ method: "POST" })
       position: offset + i,
     }));
 
-    const { error } = await supabaseAdmin.from("questions").insert(rows);
+    const { error } = await supabaseAdmin.from("questions").insert(rows as never);
     if (error) throw new Error(error.message);
 
     if (allIssues.length > 0) {
       await supabaseAdmin.from("processing_errors").insert(
         allIssues.map((i) => ({
+          course_id: courseId,
           assessment_id: data.assessment_id,
           file_name: data.source_file || null,
           question_number: i.pdf_number,
           reason: i.reason,
           raw_excerpt: i.excerpt || null,
-        })),
+        })) as never,
       );
     }
 

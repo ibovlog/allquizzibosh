@@ -21,6 +21,7 @@ export type Database = {
           attempt_count: number
           blocked: boolean
           completed: boolean
+          course_id: string | null
           created_at: string
           current_index: number
           device_id: string | null
@@ -33,6 +34,7 @@ export type Database = {
           attempt_count?: number
           blocked?: boolean
           completed?: boolean
+          course_id?: string | null
           created_at?: string
           current_index?: number
           device_id?: string | null
@@ -45,6 +47,7 @@ export type Database = {
           attempt_count?: number
           blocked?: boolean
           completed?: boolean
+          course_id?: string | null
           created_at?: string
           current_index?: number
           device_id?: string | null
@@ -59,12 +62,20 @@ export type Database = {
             referencedRelation: "assessments"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "access_keys_course_id_fkey"
+            columns: ["course_id"]
+            isOneToOne: false
+            referencedRelation: "courses"
+            referencedColumns: ["id"]
+          },
         ]
       }
       admin_messages: {
         Row: {
           assessment_id: string | null
           body: string
+          course_id: string | null
           created_at: string
           id: string
           kind: string
@@ -73,6 +84,7 @@ export type Database = {
         Insert: {
           assessment_id?: string | null
           body: string
+          course_id?: string | null
           created_at?: string
           id?: string
           kind?: string
@@ -81,6 +93,7 @@ export type Database = {
         Update: {
           assessment_id?: string | null
           body?: string
+          course_id?: string | null
           created_at?: string
           id?: string
           kind?: string
@@ -94,11 +107,19 @@ export type Database = {
             referencedRelation: "assessments"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "admin_messages_course_id_fkey"
+            columns: ["course_id"]
+            isOneToOne: false
+            referencedRelation: "courses"
+            referencedColumns: ["id"]
+          },
         ]
       }
       assessments: {
         Row: {
           allow_range: boolean
+          course_id: string | null
           created_at: string
           description: string | null
           id: string
@@ -116,6 +137,7 @@ export type Database = {
         }
         Insert: {
           allow_range?: boolean
+          course_id?: string | null
           created_at?: string
           description?: string | null
           id?: string
@@ -133,6 +155,7 @@ export type Database = {
         }
         Update: {
           allow_range?: boolean
+          course_id?: string | null
           created_at?: string
           description?: string | null
           id?: string
@@ -148,6 +171,91 @@ export type Database = {
           shuffle_options?: boolean
           updated_at?: string
         }
+        Relationships: [
+          {
+            foreignKeyName: "assessments_course_id_fkey"
+            columns: ["course_id"]
+            isOneToOne: false
+            referencedRelation: "courses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      course_admins: {
+        Row: {
+          course_id: string
+          created_at: string
+          id: string
+          is_active: boolean
+          password_hash: string
+          updated_at: string
+          username: string
+        }
+        Insert: {
+          course_id: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          password_hash: string
+          updated_at?: string
+          username: string
+        }
+        Update: {
+          course_id?: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          password_hash?: string
+          updated_at?: string
+          username?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "course_admins_course_id_fkey"
+            columns: ["course_id"]
+            isOneToOne: false
+            referencedRelation: "courses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      courses: {
+        Row: {
+          created_at: string
+          id: string
+          is_active: boolean
+          login_subtitle: string | null
+          login_title: string | null
+          logo_url: string | null
+          name: string
+          primary_color: string | null
+          slug: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          login_subtitle?: string | null
+          login_title?: string | null
+          logo_url?: string | null
+          name: string
+          primary_color?: string | null
+          slug: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          login_subtitle?: string | null
+          login_title?: string | null
+          logo_url?: string | null
+          name?: string
+          primary_color?: string | null
+          slug?: string
+          updated_at?: string
+        }
         Relationships: []
       }
       participants: {
@@ -158,6 +266,7 @@ export type Database = {
           attempt_count: number
           blocked: boolean
           completed: boolean
+          course_id: string | null
           created_at: string
           current_index: number
           device_id: string | null
@@ -172,6 +281,7 @@ export type Database = {
           attempt_count?: number
           blocked?: boolean
           completed?: boolean
+          course_id?: string | null
           created_at?: string
           current_index?: number
           device_id?: string | null
@@ -186,6 +296,7 @@ export type Database = {
           attempt_count?: number
           blocked?: boolean
           completed?: boolean
+          course_id?: string | null
           created_at?: string
           current_index?: number
           device_id?: string | null
@@ -201,12 +312,20 @@ export type Database = {
             referencedRelation: "assessments"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "participants_course_id_fkey"
+            columns: ["course_id"]
+            isOneToOne: false
+            referencedRelation: "courses"
+            referencedColumns: ["id"]
+          },
         ]
       }
       problem_reports: {
         Row: {
           access_key: string | null
           assessment_id: string
+          course_id: string | null
           created_at: string
           id: string
           pdf_number: number | null
@@ -219,6 +338,7 @@ export type Database = {
         Insert: {
           access_key?: string | null
           assessment_id: string
+          course_id?: string | null
           created_at?: string
           id?: string
           pdf_number?: number | null
@@ -231,6 +351,7 @@ export type Database = {
         Update: {
           access_key?: string | null
           assessment_id?: string
+          course_id?: string | null
           created_at?: string
           id?: string
           pdf_number?: number | null
@@ -240,11 +361,20 @@ export type Database = {
           seat_number?: number | null
           status?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "problem_reports_course_id_fkey"
+            columns: ["course_id"]
+            isOneToOne: false
+            referencedRelation: "courses"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       processing_errors: {
         Row: {
           assessment_id: string | null
+          course_id: string | null
           created_at: string
           file_name: string | null
           id: string
@@ -256,6 +386,7 @@ export type Database = {
         }
         Insert: {
           assessment_id?: string | null
+          course_id?: string | null
           created_at?: string
           file_name?: string | null
           id?: string
@@ -267,6 +398,7 @@ export type Database = {
         }
         Update: {
           assessment_id?: string | null
+          course_id?: string | null
           created_at?: string
           file_name?: string | null
           id?: string
@@ -285,6 +417,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "processing_errors_course_id_fkey"
+            columns: ["course_id"]
+            isOneToOne: false
+            referencedRelation: "courses"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "processing_errors_question_id_fkey"
             columns: ["question_id"]
             isOneToOne: false
@@ -297,6 +436,7 @@ export type Database = {
         Row: {
           assessment_id: string
           correct_index: number
+          course_id: string | null
           created_at: string
           id: string
           options: Json
@@ -308,6 +448,7 @@ export type Database = {
         Insert: {
           assessment_id: string
           correct_index?: number
+          course_id?: string | null
           created_at?: string
           id?: string
           options?: Json
@@ -319,6 +460,7 @@ export type Database = {
         Update: {
           assessment_id?: string
           correct_index?: number
+          course_id?: string | null
           created_at?: string
           id?: string
           options?: Json
@@ -335,6 +477,13 @@ export type Database = {
             referencedRelation: "assessments"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "questions_course_id_fkey"
+            columns: ["course_id"]
+            isOneToOne: false
+            referencedRelation: "courses"
+            referencedColumns: ["id"]
+          },
         ]
       }
       quiz_results: {
@@ -343,6 +492,7 @@ export type Database = {
           assessment_id: string | null
           attempt_number: number
           blank_count: number | null
+          course_id: string | null
           created_at: string
           details: Json | null
           id: string
@@ -356,6 +506,7 @@ export type Database = {
           assessment_id?: string | null
           attempt_number?: number
           blank_count?: number | null
+          course_id?: string | null
           created_at?: string
           details?: Json | null
           id?: string
@@ -369,6 +520,7 @@ export type Database = {
           assessment_id?: string | null
           attempt_number?: number
           blank_count?: number | null
+          course_id?: string | null
           created_at?: string
           details?: Json | null
           id?: string
@@ -383,6 +535,13 @@ export type Database = {
             columns: ["assessment_id"]
             isOneToOne: false
             referencedRelation: "assessments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quiz_results_course_id_fkey"
+            columns: ["course_id"]
+            isOneToOne: false
+            referencedRelation: "courses"
             referencedColumns: ["id"]
           },
         ]
