@@ -71,6 +71,8 @@ function AdminPage() {
   const wipeResults = useServerFn(clearResults);
   const addAssessment = useServerFn(createAssessment);
   const editAssessment = useServerFn(updateAssessment);
+  const doEnterCourse = useServerFn(enterCourse);
+  const fetchSuper = useServerFn(getSuperData);
   const removeAssessment = useServerFn(deleteAssessment);
   const storeQuestion = useServerFn(saveQuestion);
   const removeQuestion = useServerFn(deleteQuestion);
