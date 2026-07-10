@@ -86,7 +86,7 @@ function AdminPage() {
   const resolveReport = useServerFn(resolveProblemReport);
   const removeReport = useServerFn(deleteProblemReport);
 
-  const [password, setPassword] = useState("");
+  const [token, setPassword] = useState("");
   const [authed, setAuthed] = useState(false);
   const [loggingIn, setLoggingIn] = useState(false);
   const [assessments, setAssessments] = useState<Assessment[]>([]);
@@ -112,7 +112,7 @@ function AdminPage() {
   const [aAllowRange, setAAllowRange] = useState(true);
 
   async function refresh(pw: string) {
-    const data = await fetchData({ data: { password: pw } });
+    const data = await fetchData({ data: { token: pw } });
     setAssessments(data.assessments as Assessment[]);
     setResults(data.results as AdminResult[]);
     setQuestions(
@@ -130,12 +130,12 @@ function AdminPage() {
   }
 
   async function doLogin() {
-    if (!password.trim()) { toast.error("Zəhmət olmasa parolu daxil edin."); return; }
+    if (!token.trim()) { toast.error("Zəhmət olmasa parolu daxil edin."); return; }
     setLoggingIn(true);
     try {
-      const res = await login({ data: { password } });
+      const res = await login({ data: { token } });
       if (!res.ok) { toast.error("Parol yanlışdır."); return; }
-      await refresh(password);
+      await refresh(token);
       setAuthed(true);
     } catch {
       toast.error("Giriş zamanı xəta baş verdi.");
@@ -157,7 +157,7 @@ function AdminPage() {
     try {
       const res = await addAssessment({
         data: {
-          password, name: aName.trim(), question_count: parseInt(aCount, 10) || 20,
+          token, name: aName.trim(), question_count: parseInt(aCount, 10) || 20,
           order_mode: aOrder, login_mode: aLogin,
           seat_min: parseInt(aSeatMin, 10) || 1, seat_max: parseInt(aSeatMax, 10) || 100,
           shuffle_options: aShuffleOpt, max_attempts: parseInt(aMaxAttempts, 10) || 0,
@@ -165,7 +165,7 @@ function AdminPage() {
         },
       });
       setAName("");
-      await refresh(password);
+      await refresh(token);
       setSelected(res.id);
       toast.success("Assessment yaradıldı.");
     } catch (err) {
@@ -189,17 +189,17 @@ function AdminPage() {
         const images = await pdfToImages(file, { maxPages: 60 });
         if (images.length === 0) { toast.error("PDF-dən səhifə oxunmadı."); return; }
         setUploadStatus(`${images.length} səhifə AI ilə təhlil olunur…`);
-        res = await runExtract({ data: { password, assessment_id: selected, images, source_file: file.name, replace: true } });
+        res = await runExtract({ data: { token, assessment_id: selected, images, source_file: file.name, replace: true } });
       } else {
         setUploadStatus("Word mətni oxunur…");
         const text = await docxToText(file);
         if (!text.trim()) { toast.error("Word faylından mətn oxunmadı."); return; }
         setUploadStatus("Mətn AI ilə təhlil olunur…");
-        res = await runExtract({ data: { password, assessment_id: selected, text, source_file: file.name, replace: true } });
+        res = await runExtract({ data: { token, assessment_id: selected, text, source_file: file.name, replace: true } });
       }
       if (res.errors > 0) toast.warning(`${res.count} sual yaradıldı, ${res.errors} xəta qeydə alındı.`);
       else toast.success(`${res.count} sual yaradıldı!`);
-      await refresh(password);
+      await refresh(token);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "";
       if (msg.includes("RATE_LIMIT")) toast.error("AI çox sorğu aldı. Bir az sonra cəhd edin.");
@@ -223,7 +223,7 @@ function AdminPage() {
           <h1 className="mt-5 text-center text-2xl font-bold text-foreground">Admin girişi</h1>
           <p className="mt-1 text-center text-sm text-muted-foreground">Assessment idarə etmək üçün parolu daxil edin.</p>
           <div className="mt-6 space-y-4">
-            <Input type="password" placeholder="Admin parolu" value={password}
+            <Input type="password" placeholder="Admin parolu" value={token}
               onChange={(e) => setPassword(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && doLogin()} className="h-12 rounded-xl" />
             <Button onClick={doLogin} disabled={loggingIn} className="h-12 w-full rounded-xl text-base font-semibold">
@@ -339,13 +339,13 @@ function AdminPage() {
                 assessments.map((a) => (
                   <AssessmentRow key={a.id} a={a}
                     qCount={questions.filter((q) => q.assessment_id === a.id).length}
-                    onSave={async (patch) => { await editAssessment({ data: { password, id: a.id, ...patch } }); await refresh(password); toast.success("Yeniləndi."); }}
-                    onToggle={async () => { await editAssessment({ data: { password, id: a.id, is_open: !a.is_open } }); await refresh(password); }}
+                    onSave={async (patch) => { await editAssessment({ data: { token, id: a.id, ...patch } }); await refresh(token); toast.success("Yeniləndi."); }}
+                    onToggle={async () => { await editAssessment({ data: { token, id: a.id, is_open: !a.is_open } }); await refresh(token); }}
                     onDelete={async () => {
                       if (!confirm(`"${a.name}" silinsin? Bütün məlumatları silinəcək.`)) return;
-                      await removeAssessment({ data: { password, id: a.id } });
+                      await removeAssessment({ data: { token, id: a.id } });
                       if (selected === a.id) setSelected("");
-                      await refresh(password);
+                      await refresh(token);
                       toast.success("Silindi.");
                     }} />
                 ))
@@ -372,8 +372,8 @@ function AdminPage() {
                   </label>
                 </div>
 
-                <QuestionsEditor assessmentId={selected} questions={aQuestions} password={password}
-                  onSave={storeQuestion} onDelete={removeQuestion} onClear={wipeQuestions} refresh={() => refresh(password)} />
+                <QuestionsEditor assessmentId={selected} questions={aQuestions} token={token}
+                  onSave={storeQuestion} onDelete={removeQuestion} onClear={wipeQuestions} refresh={() => refresh(token)} />
               </div>
             )}
           </TabsContent>
@@ -383,8 +383,8 @@ function AdminPage() {
             {!selectedAssessment ? (
               <Empty icon={<KeyRound />} text="Əvvəlcə assessment seçin." />
             ) : (
-              <AccessKeysManager assessmentId={selected} keys={aKeys} password={password}
-                onGenerate={addKeys} onBlock={blockKey} onReset={resetKey} onDelete={removeKey} refresh={() => refresh(password)} />
+              <AccessKeysManager assessmentId={selected} keys={aKeys} token={token}
+                onGenerate={addKeys} onBlock={blockKey} onReset={resetKey} onDelete={removeKey} refresh={() => refresh(token)} />
             )}
           </TabsContent>
 
@@ -398,10 +398,10 @@ function AdminPage() {
               <div className="space-y-3">
                 {aParticipants.map((p) => (
                   <ParticipantRow key={p.id} p={p}
-                    onBlock={async () => { await blockParticipant({ data: { password, id: p.id, blocked: true } }); await refresh(password); toast.success("Bloklandı."); }}
-                    onUnblock={async (resume) => { await blockParticipant({ data: { password, id: p.id, blocked: false, resume } }); await refresh(password); toast.success(resume ? "Blok açıldı (davam edir)." : "Blok açıldı (sıfırlandı)."); }}
-                    onReset={async (newSeat) => { await doReset({ data: { password, id: p.id, new_seat: newSeat } }); await refresh(password); toast.success("Cihaz sıfırlandı."); }}
-                    onDelete={async () => { await removeParticipant({ data: { password, id: p.id } }); await refresh(password); }} />
+                    onBlock={async () => { await blockParticipant({ data: { token, id: p.id, blocked: true } }); await refresh(token); toast.success("Bloklandı."); }}
+                    onUnblock={async (resume) => { await blockParticipant({ data: { token, id: p.id, blocked: false, resume } }); await refresh(token); toast.success(resume ? "Blok açıldı (davam edir)." : "Blok açıldı (sıfırlandı)."); }}
+                    onReset={async (newSeat) => { await doReset({ data: { token, id: p.id, new_seat: newSeat } }); await refresh(token); toast.success("Cihaz sıfırlandı."); }}
+                    onDelete={async () => { await removeParticipant({ data: { token, id: p.id } }); await refresh(token); }} />
                 ))}
               </div>
             )}
@@ -412,7 +412,7 @@ function AdminPage() {
             {!selectedAssessment ? (
               <Empty icon={<MessageSquare />} text="Əvvəlcə assessment seçin." />
             ) : (
-              <MessageSender assessment={selectedAssessment} participants={aParticipants} password={password} onSend={postMessage} />
+              <MessageSender assessment={selectedAssessment} participants={aParticipants} token={token} onSend={postMessage} />
             )}
           </TabsContent>
 
@@ -422,7 +422,7 @@ function AdminPage() {
               <Empty icon={<AlertTriangle />} text="Əvvəlcə assessment seçin." />
             ) : (
               <ErrorsPanel errors={aErrors} questions={aQuestions} assessmentName={selectedAssessment.name}
-                password={password} onSave={storeQuestion} onResolve={resolveErr} onDelete={removeErr} refresh={() => refresh(password)} />
+                token={token} onSave={storeQuestion} onResolve={resolveErr} onDelete={removeErr} refresh={() => refresh(token)} />
             )}
           </TabsContent>
 
@@ -432,7 +432,7 @@ function AdminPage() {
               <Empty icon={<Flag />} text="Əvvəlcə assessment seçin." />
             ) : (
               <ProblemsPanel reports={aReports} questions={aQuestions} assessmentName={selectedAssessment.name}
-                password={password} onSave={storeQuestion} onResolve={resolveReport} onDelete={removeReport} refresh={() => refresh(password)} />
+                token={token} onSave={storeQuestion} onResolve={resolveReport} onDelete={removeReport} refresh={() => refresh(token)} />
             )}
           </TabsContent>
 
@@ -444,7 +444,7 @@ function AdminPage() {
               <>
                 {aResults.length > 0 && (
                   <div className="mb-5 flex justify-end">
-                    <Button variant="outline" onClick={async () => { await wipeResults({ data: { password, assessment_id: selected } }); await refresh(password); toast.success("Nəticələr silindi."); }}
+                    <Button variant="outline" onClick={async () => { await wipeResults({ data: { token, assessment_id: selected } }); await refresh(token); toast.success("Nəticələr silindi."); }}
                       className="rounded-xl text-destructive hover:text-destructive">
                       <Trash2 className="mr-1.5 h-4 w-4" /> Nəticələri sil
                     </Button>
@@ -533,8 +533,8 @@ function AssessmentRow({ a, qCount, onSave, onToggle, onDelete }: {
   );
 }
 
-function QuestionsEditor({ assessmentId, questions, password, onSave, onDelete, onClear, refresh }: {
-  assessmentId: string; questions: AdminQuestion[]; password: string;
+function QuestionsEditor({ assessmentId, questions, token, onSave, onDelete, onClear, refresh }: {
+  assessmentId: string; questions: AdminQuestion[]; token: string;
   onSave: ReturnType<typeof useServerFn>; onDelete: ReturnType<typeof useServerFn>;
   onClear: ReturnType<typeof useServerFn>; refresh: () => Promise<void>;
 }) {
@@ -559,7 +559,7 @@ function QuestionsEditor({ assessmentId, questions, password, onSave, onDelete, 
         <div className="flex gap-2">
           <Button size="sm" variant="outline" onClick={() => setAdding(true)} className="rounded-lg"><Plus className="mr-1 h-4 w-4" /> Sual əlavə et</Button>
           {questions.length > 0 && (
-            <Button size="sm" variant="outline" onClick={async () => { if (!confirm("Bütün suallar silinsin?")) return; await onClear({ data: { password, assessment_id: assessmentId } }); await refresh(); toast.success("Suallar silindi."); }}
+            <Button size="sm" variant="outline" onClick={async () => { if (!confirm("Bütün suallar silinsin?")) return; await onClear({ data: { token, assessment_id: assessmentId } }); await refresh(); toast.success("Suallar silindi."); }}
               className="rounded-lg text-destructive hover:text-destructive"><Trash2 className="mr-1 h-4 w-4" /> Hamısını sil</Button>
           )}
         </div>
@@ -572,13 +572,13 @@ function QuestionsEditor({ assessmentId, questions, password, onSave, onDelete, 
 
       {adding && (
         <QuestionForm onCancel={() => setAdding(false)}
-          onSubmit={async (vals) => { await onSave({ data: { password, assessment_id: assessmentId, ...vals } }); setAdding(false); await refresh(); toast.success("Sual əlavə edildi."); }} />
+          onSubmit={async (vals) => { await onSave({ data: { token, assessment_id: assessmentId, ...vals } }); setAdding(false); await refresh(); toast.success("Sual əlavə edildi."); }} />
       )}
 
       {filtered.map((q, idx) =>
         editing === q.id ? (
           <QuestionForm key={q.id} initial={q} onCancel={() => setEditing(null)}
-            onSubmit={async (vals) => { await onSave({ data: { password, id: q.id, assessment_id: assessmentId, ...vals } }); setEditing(null); await refresh(); toast.success("Yadda saxlanıldı."); }} />
+            onSubmit={async (vals) => { await onSave({ data: { token, id: q.id, assessment_id: assessmentId, ...vals } }); setEditing(null); await refresh(); toast.success("Yadda saxlanıldı."); }} />
         ) : (
           <div key={q.id} className="rounded-2xl border border-border bg-card p-5">
             <div className="flex items-start justify-between gap-3">
@@ -587,7 +587,7 @@ function QuestionsEditor({ assessmentId, questions, password, onSave, onDelete, 
               </p>
               <div className="flex shrink-0 gap-1">
                 <Button size="icon" variant="ghost" onClick={() => setEditing(q.id)}><Pencil className="h-4 w-4" /></Button>
-                <Button size="icon" variant="ghost" onClick={async () => { await onDelete({ data: { password, id: q.id } }); await refresh(); }} className="text-destructive hover:text-destructive"><Trash2 className="h-4 w-4" /></Button>
+                <Button size="icon" variant="ghost" onClick={async () => { await onDelete({ data: { token, id: q.id } }); await refresh(); }} className="text-destructive hover:text-destructive"><Trash2 className="h-4 w-4" /></Button>
               </div>
             </div>
             <div className="mt-3 grid gap-2 sm:grid-cols-2">
@@ -667,8 +667,8 @@ function QuestionForm({ initial, onSubmit, onCancel }: {
   );
 }
 
-function AccessKeysManager({ assessmentId, keys, password, onGenerate, onBlock, onReset, onDelete, refresh }: {
-  assessmentId: string; keys: AccessKey[]; password: string;
+function AccessKeysManager({ assessmentId, keys, token, onGenerate, onBlock, onReset, onDelete, refresh }: {
+  assessmentId: string; keys: AccessKey[]; token: string;
   onGenerate: ReturnType<typeof useServerFn>; onBlock: ReturnType<typeof useServerFn>;
   onReset: ReturnType<typeof useServerFn>; onDelete: ReturnType<typeof useServerFn>; refresh: () => Promise<void>;
 }) {
@@ -679,7 +679,7 @@ function AccessKeysManager({ assessmentId, keys, password, onGenerate, onBlock, 
   async function generate() {
     setBusy(true);
     try {
-      await onGenerate({ data: { password, assessment_id: assessmentId, count: parseInt(count, 10) || 1 } });
+      await onGenerate({ data: { token, assessment_id: assessmentId, count: parseInt(count, 10) || 1 } });
       await refresh(); toast.success("Açarlar yaradıldı.");
     } catch (err) { toast.error(err instanceof Error ? err.message : "Xəta."); } finally { setBusy(false); }
   }
@@ -688,7 +688,7 @@ function AccessKeysManager({ assessmentId, keys, password, onGenerate, onBlock, 
     if (list.length === 0) return toast.error("Açar daxil edin.");
     setBusy(true);
     try {
-      await onGenerate({ data: { password, assessment_id: assessmentId, keys: list } });
+      await onGenerate({ data: { token, assessment_id: assessmentId, keys: list } });
       setCustom(""); await refresh(); toast.success("Açarlar əlavə edildi.");
     } catch (err) { toast.error(err instanceof Error ? err.message : "Xəta."); } finally { setBusy(false); }
   }
@@ -722,11 +722,11 @@ function AccessKeysManager({ assessmentId, keys, password, onGenerate, onBlock, 
                 <span className="text-xs text-muted-foreground">{k.blocked ? "Bloklanıb" : k.device_id ? "Cihaza bağlı" : "Boş"}</span>
               </div>
               <div className="flex items-center gap-2">
-                <Button size="sm" variant="outline" onClick={async () => { await onReset({ data: { password, id: k.id } }); await refresh(); toast.success("Cihaz sıfırlandı."); }} className="rounded-lg"><RotateCcw className="mr-1 h-4 w-4" /> Reset</Button>
-                <Button size="sm" variant="outline" onClick={async () => { await onBlock({ data: { password, id: k.id, blocked: !k.blocked } }); await refresh(); }} className="rounded-lg">
+                <Button size="sm" variant="outline" onClick={async () => { await onReset({ data: { token, id: k.id } }); await refresh(); toast.success("Cihaz sıfırlandı."); }} className="rounded-lg"><RotateCcw className="mr-1 h-4 w-4" /> Reset</Button>
+                <Button size="sm" variant="outline" onClick={async () => { await onBlock({ data: { token, id: k.id, blocked: !k.blocked } }); await refresh(); }} className="rounded-lg">
                   {k.blocked ? <><Unlock className="mr-1 h-4 w-4" /> Aç</> : <><Lock className="mr-1 h-4 w-4" /> Blokla</>}
                 </Button>
-                <Button size="icon" variant="ghost" onClick={async () => { await onDelete({ data: { password, id: k.id } }); await refresh(); }} className="text-destructive hover:text-destructive"><Trash2 className="h-4 w-4" /></Button>
+                <Button size="icon" variant="ghost" onClick={async () => { await onDelete({ data: { token, id: k.id } }); await refresh(); }} className="text-destructive hover:text-destructive"><Trash2 className="h-4 w-4" /></Button>
               </div>
             </div>
           ))}
@@ -771,8 +771,8 @@ function ParticipantRow({ p, onBlock, onUnblock, onReset, onDelete }: {
   );
 }
 
-function MessageSender({ assessment, participants, password, onSend }: {
-  assessment: Assessment; participants: Participant[]; password: string; onSend: ReturnType<typeof useServerFn>;
+function MessageSender({ assessment, participants, token, onSend }: {
+  assessment: Assessment; participants: Participant[]; token: string; onSend: ReturnType<typeof useServerFn>;
 }) {
   const [body, setBody] = useState("");
   const [kind, setKind] = useState<"info" | "warning">("info");
@@ -783,7 +783,7 @@ function MessageSender({ assessment, participants, password, onSend }: {
     if (!body.trim()) return toast.error("Mesaj mətnini daxil edin.");
     setSending(true);
     try {
-      await onSend({ data: { password, assessment_id: assessment.id, seat_number: target === "all" ? null : parseInt(target, 10), body: body.trim(), kind } });
+      await onSend({ data: { token, assessment_id: assessment.id, seat_number: target === "all" ? null : parseInt(target, 10), body: body.trim(), kind } });
       setBody(""); toast.success("Mesaj göndərildi.");
     } catch (err) { toast.error(err instanceof Error ? err.message : "Xəta."); } finally { setSending(false); }
   }
@@ -809,8 +809,8 @@ function MessageSender({ assessment, participants, password, onSend }: {
   );
 }
 
-function ErrorsPanel({ errors, questions, assessmentName, password, onSave, onResolve, onDelete, refresh }: {
-  errors: ProcessingError[]; questions: AdminQuestion[]; assessmentName: string; password: string;
+function ErrorsPanel({ errors, questions, assessmentName, token, onSave, onResolve, onDelete, refresh }: {
+  errors: ProcessingError[]; questions: AdminQuestion[]; assessmentName: string; token: string;
   onSave: ReturnType<typeof useServerFn>; onResolve: ReturnType<typeof useServerFn>; onDelete: ReturnType<typeof useServerFn>; refresh: () => Promise<void>;
 }) {
   const [editing, setEditing] = useState<string | null>(null);
@@ -837,16 +837,16 @@ function ErrorsPanel({ errors, questions, assessmentName, password, onSave, onRe
               </div>
               <div className="flex shrink-0 flex-wrap gap-2">
                 {linked && <Button size="sm" variant="outline" onClick={() => setEditing(editing === e.id ? null : e.id)} className="rounded-lg"><Pencil className="mr-1 h-4 w-4" /> Sualı düzəlt</Button>}
-                <Button size="sm" variant="outline" onClick={async () => { await onResolve({ data: { password, id: e.id, status: e.status === "resolved" ? "pending" : "resolved" } }); await refresh(); }} className="rounded-lg">
+                <Button size="sm" variant="outline" onClick={async () => { await onResolve({ data: { token, id: e.id, status: e.status === "resolved" ? "pending" : "resolved" } }); await refresh(); }} className="rounded-lg">
                   {e.status === "resolved" ? "Yenidən aç" : <><Check className="mr-1 h-4 w-4" /> Bağla</>}
                 </Button>
-                <Button size="icon" variant="ghost" onClick={async () => { await onDelete({ data: { password, id: e.id } }); await refresh(); }} className="text-destructive hover:text-destructive"><Trash2 className="h-4 w-4" /></Button>
+                <Button size="icon" variant="ghost" onClick={async () => { await onDelete({ data: { token, id: e.id } }); await refresh(); }} className="text-destructive hover:text-destructive"><Trash2 className="h-4 w-4" /></Button>
               </div>
             </div>
             {editing === e.id && linked && (
               <div className="mt-4">
                 <QuestionForm initial={linked} onCancel={() => setEditing(null)}
-                  onSubmit={async (vals) => { await onSave({ data: { password, id: linked.id, assessment_id: linked.assessment_id, ...vals } }); setEditing(null); await refresh(); toast.success("Sual düzəldildi."); }} />
+                  onSubmit={async (vals) => { await onSave({ data: { token, id: linked.id, assessment_id: linked.assessment_id, ...vals } }); setEditing(null); await refresh(); toast.success("Sual düzəldildi."); }} />
               </div>
             )}
           </div>
@@ -858,8 +858,8 @@ function ErrorsPanel({ errors, questions, assessmentName, password, onSave, onRe
 
 type ResultDetailRow = { prompt: string; pdf_number: number | null; options: string[]; chosen: number | null; correct: number };
 
-function ProblemsPanel({ reports, questions, assessmentName, password, onSave, onResolve, onDelete, refresh }: {
-  reports: ProblemReport[]; questions: AdminQuestion[]; assessmentName: string; password: string;
+function ProblemsPanel({ reports, questions, assessmentName, token, onSave, onResolve, onDelete, refresh }: {
+  reports: ProblemReport[]; questions: AdminQuestion[]; assessmentName: string; token: string;
   onSave: ReturnType<typeof useServerFn>; onResolve: ReturnType<typeof useServerFn>; onDelete: ReturnType<typeof useServerFn>; refresh: () => Promise<void>;
 }) {
   const [editing, setEditing] = useState<string | null>(null);
@@ -890,16 +890,16 @@ function ProblemsPanel({ reports, questions, assessmentName, password, onSave, o
               </div>
               <div className="flex shrink-0 flex-wrap gap-2">
                 {linked && <Button size="sm" variant="outline" onClick={() => setEditing(editing === r.id ? null : r.id)} className="rounded-lg"><Pencil className="mr-1 h-4 w-4" /> Sualı düzəlt</Button>}
-                <Button size="sm" variant="outline" onClick={async () => { await onResolve({ data: { password, id: r.id, status: r.status === "resolved" ? "pending" : "resolved" } }); await refresh(); }} className="rounded-lg">
+                <Button size="sm" variant="outline" onClick={async () => { await onResolve({ data: { token, id: r.id, status: r.status === "resolved" ? "pending" : "resolved" } }); await refresh(); }} className="rounded-lg">
                   {r.status === "resolved" ? "Yenidən aç" : <><Check className="mr-1 h-4 w-4" /> Təsdiqlə & bağla</>}
                 </Button>
-                <Button size="icon" variant="ghost" onClick={async () => { await onDelete({ data: { password, id: r.id } }); await refresh(); }} className="text-destructive hover:text-destructive" title="Rədd et"><Trash2 className="h-4 w-4" /></Button>
+                <Button size="icon" variant="ghost" onClick={async () => { await onDelete({ data: { token, id: r.id } }); await refresh(); }} className="text-destructive hover:text-destructive" title="Rədd et"><Trash2 className="h-4 w-4" /></Button>
               </div>
             </div>
             {editing === r.id && linked && (
               <div className="mt-4">
                 <QuestionForm initial={linked} onCancel={() => setEditing(null)}
-                  onSubmit={async (vals) => { await onSave({ data: { password, id: linked.id, assessment_id: linked.assessment_id, ...vals } }); setEditing(null); await refresh(); toast.success("Sual düzəldildi, problem siyahıdan silindi."); }} />
+                  onSubmit={async (vals) => { await onSave({ data: { token, id: linked.id, assessment_id: linked.assessment_id, ...vals } }); setEditing(null); await refresh(); toast.success("Sual düzəldildi, problem siyahıdan silindi."); }} />
               </div>
             )}
           </div>
