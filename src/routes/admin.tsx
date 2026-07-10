@@ -19,6 +19,7 @@ import {
   setParticipantBlocked, resetParticipant, deleteParticipant, sendMessage,
   createAccessKeys, setAccessKeyBlocked, resetAccessKey, deleteAccessKey,
   resolveProcessingError, deleteProcessingError, resolveProblemReport, deleteProblemReport,
+  enterCourse, getSuperData,
 } from "@/lib/quiz.functions";
 import { docxToText } from "@/lib/quiz-client";
 import { pdfToImages } from "@/lib/pdf-to-images";
