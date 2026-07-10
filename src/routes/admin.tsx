@@ -86,7 +86,13 @@ function AdminPage() {
   const resolveReport = useServerFn(resolveProblemReport);
   const removeReport = useServerFn(deleteProblemReport);
 
-  const [token, setPassword] = useState("");
+  const [token, setToken] = useState("");
+  const [userInput, setUserInput] = useState("");
+  const [pwInput, setPwInput] = useState("");
+  const [role, setRole] = useState<"super" | "course" | null>(null);
+  const [courseName, setCourseName] = useState<string | null>(null);
+  const [superCourses, setSuperCourses] = useState<Array<{ id: string; name: string; is_active: boolean }>>([]);
+  const [needCoursePick, setNeedCoursePick] = useState(false);
   const [authed, setAuthed] = useState(false);
   const [loggingIn, setLoggingIn] = useState(false);
   const [assessments, setAssessments] = useState<Assessment[]>([]);
