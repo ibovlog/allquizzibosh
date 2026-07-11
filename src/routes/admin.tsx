@@ -336,10 +336,17 @@ function AdminPage() {
       <div className="mx-auto max-w-5xl px-4 py-8">
         <div className="mb-6 flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-foreground">Admin paneli</h1>
+            <h1 className="text-2xl font-bold text-foreground">Admin paneli{courseName ? ` — ${courseName}` : ""}</h1>
             <p className="text-sm text-muted-foreground">Assessmentlər, suallar, açarlar, iştirakçılar.</p>
           </div>
-          <Link to="/"><Button variant="outline" className="rounded-xl"><ArrowLeft className="mr-1 h-4 w-4" />Quiz</Button></Link>
+          <div className="flex items-center gap-2">
+            {role === "super" && (
+              <Button variant="outline" className="rounded-xl" onClick={backToSuper}>
+                <Crown className="mr-1 h-4 w-4" />Super panel
+              </Button>
+            )}
+            <Link to="/"><Button variant="outline" className="rounded-xl"><ArrowLeft className="mr-1 h-4 w-4" />Quiz</Button></Link>
+          </div>
         </div>
 
         {assessments.length > 0 && (
