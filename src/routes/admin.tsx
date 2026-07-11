@@ -285,6 +285,22 @@ function AdminPage() {
     }
   }
 
+  if (superMode && superData) {
+    return (
+      <SuperDashboard
+        token={superToken}
+        data={superData}
+        onRefresh={refreshSuper}
+        onEnterCourse={enterCoursePanel}
+        createCourseWithAdmin={addCourseWithAdmin}
+        updateCourse={editCourse}
+        deleteCourse={removeCourse}
+        updateCourseAdmin={editCourseAdmin}
+        deleteCourseAdmin={removeCourseAdmin}
+      />
+    );
+  }
+
   if (!authed) {
     return (
       <main className="relative flex min-h-screen items-center justify-center bg-background px-4">
@@ -295,38 +311,18 @@ function AdminPage() {
             <ShieldCheck className="h-7 w-7" />
           </div>
           <h1 className="mt-5 text-center text-2xl font-bold text-foreground">Admin girişi</h1>
-          {needCoursePick ? (
-            <>
-              <p className="mt-1 text-center text-sm text-muted-foreground">Super Admin — idarə etmək üçün kurs seçin.</p>
-              <div className="mt-6 space-y-2 max-h-80 overflow-auto">
-                {superCourses.length === 0 && (
-                  <p className="text-center text-sm text-muted-foreground">Hələ kurs yoxdur. Əvvəlcə kurs yaradın (tezliklə).</p>
-                )}
-                {superCourses.map((c) => (
-                  <Button key={c.id} variant="outline" onClick={() => pickCourse(c.id)}
-                    className="h-11 w-full justify-between rounded-xl">
-                    <span>{c.name}</span>
-                    <span className="text-xs text-muted-foreground">{c.is_active ? "aktiv" : "deaktiv"}</span>
-                  </Button>
-                ))}
-              </div>
-            </>
-          ) : (
-            <>
-              <p className="mt-1 text-center text-sm text-muted-foreground">İstifadəçi adı və şifrə ilə daxil olun (Super Admin üçün yalnız şifrə).</p>
-              <div className="mt-6 space-y-4">
-                <Input type="text" placeholder="İstifadəçi adı (Super Admin üçün boş)" value={userInput}
-                  onChange={(e) => setUserInput(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && doLogin()} className="h-12 rounded-xl" />
-                <Input type="password" placeholder="Şifrə" value={pwInput}
-                  onChange={(e) => setPwInput(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && doLogin()} className="h-12 rounded-xl" />
-                <Button onClick={doLogin} disabled={loggingIn} className="h-12 w-full rounded-xl text-base font-semibold">
-                  {loggingIn ? <Loader2 className="h-5 w-5 animate-spin" /> : "Daxil ol"}
-                </Button>
-              </div>
-            </>
-          )}
+          <p className="mt-1 text-center text-sm text-muted-foreground">İstifadəçi adı və şifrə ilə daxil olun (Super Admin üçün yalnız şifrə).</p>
+          <div className="mt-6 space-y-4">
+            <Input type="text" placeholder="İstifadəçi adı (Super Admin üçün boş)" value={userInput}
+              onChange={(e) => setUserInput(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && doLogin()} className="h-12 rounded-xl" />
+            <Input type="password" placeholder="Şifrə" value={pwInput}
+              onChange={(e) => setPwInput(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && doLogin()} className="h-12 rounded-xl" />
+            <Button onClick={doLogin} disabled={loggingIn} className="h-12 w-full rounded-xl text-base font-semibold">
+              {loggingIn ? <Loader2 className="h-5 w-5 animate-spin" /> : "Daxil ol"}
+            </Button>
+          </div>
           <div className="mt-6 text-center">
             <Link to="/" className="text-sm font-medium text-muted-foreground hover:text-primary">← Quiz səhifəsinə qayıt</Link>
           </div>
