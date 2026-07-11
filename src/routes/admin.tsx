@@ -90,6 +90,11 @@ function AdminPage() {
   const editAssessment = useServerFn(updateAssessment);
   const doEnterCourse = useServerFn(enterCourse);
   const fetchSuper = useServerFn(getSuperData);
+  const addCourseWithAdmin = useServerFn(createCourseWithAdmin);
+  const editCourse = useServerFn(updateCourse);
+  const removeCourse = useServerFn(deleteCourse);
+  const editCourseAdmin = useServerFn(updateCourseAdmin);
+  const removeCourseAdmin = useServerFn(deleteCourseAdmin);
   const removeAssessment = useServerFn(deleteAssessment);
   const storeQuestion = useServerFn(saveQuestion);
   const removeQuestion = useServerFn(deleteQuestion);
@@ -111,8 +116,9 @@ function AdminPage() {
   const [pwInput, setPwInput] = useState("");
   const [role, setRole] = useState<"super" | "course" | null>(null);
   const [courseName, setCourseName] = useState<string | null>(null);
-  const [superCourses, setSuperCourses] = useState<Array<{ id: string; name: string; is_active: boolean }>>([]);
-  const [needCoursePick, setNeedCoursePick] = useState(false);
+  const [superToken, setSuperToken] = useState("");
+  const [superMode, setSuperMode] = useState(false);
+  const [superData, setSuperData] = useState<SuperData | null>(null);
   const [authed, setAuthed] = useState(false);
   const [loggingIn, setLoggingIn] = useState(false);
   const [assessments, setAssessments] = useState<Assessment[]>([]);
