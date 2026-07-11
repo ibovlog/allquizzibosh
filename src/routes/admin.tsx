@@ -64,6 +64,21 @@ type ProblemReport = {
   question_text: string | null; seat_number: number | null; access_key: string | null;
   reason: string; status: string; created_at: string;
 };
+type SuperCourse = {
+  id: string; name: string; slug: string; is_active: boolean;
+  logo_url: string | null; primary_color: string | null;
+  login_title: string | null; login_subtitle: string | null; created_at: string;
+};
+type SuperAdminRow = {
+  id: string; course_id: string; username: string; is_active: boolean;
+  created_at: string; last_login_at: string | null;
+};
+type SuperData = {
+  courses: SuperCourse[];
+  admins: SuperAdminRow[];
+  statsByCourse: Record<string, { assessments: number; users: number }>;
+  totals: { courses: number; admins: number; assessments: number; users: number; activeUsers: number };
+};
 
 function AdminPage() {
   const login = useServerFn(adminLogin);
