@@ -5,6 +5,7 @@ import {
   ShieldCheck, Upload, Loader2, FileText, Trash2, ArrowLeft, BarChart3, Sparkles,
   FolderPlus, Users, MessageSquare, Plus, Pencil, Lock, Unlock, RotateCcw, Send,
   Check, X, KeyRound, AlertTriangle, Search, Copy, Flag,
+  Crown, LayoutDashboard, GraduationCap, Settings, LogIn, UserPlus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,7 +20,8 @@ import {
   setParticipantBlocked, resetParticipant, deleteParticipant, sendMessage,
   createAccessKeys, setAccessKeyBlocked, resetAccessKey, deleteAccessKey,
   resolveProcessingError, deleteProcessingError, resolveProblemReport, deleteProblemReport,
-  enterCourse, getSuperData,
+  enterCourse, getSuperData, createCourseWithAdmin, updateCourse, deleteCourse,
+  updateCourseAdmin, deleteCourseAdmin,
 } from "@/lib/quiz.functions";
 import { docxToText } from "@/lib/quiz-client";
 import { pdfToImages } from "@/lib/pdf-to-images";
