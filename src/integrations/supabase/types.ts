@@ -187,6 +187,7 @@ export type Database = {
           created_at: string
           id: string
           is_active: boolean
+          last_login_at: string | null
           password_hash: string
           updated_at: string
           username: string
@@ -196,6 +197,7 @@ export type Database = {
           created_at?: string
           id?: string
           is_active?: boolean
+          last_login_at?: string | null
           password_hash: string
           updated_at?: string
           username: string
@@ -205,6 +207,7 @@ export type Database = {
           created_at?: string
           id?: string
           is_active?: boolean
+          last_login_at?: string | null
           password_hash?: string
           updated_at?: string
           username?: string
