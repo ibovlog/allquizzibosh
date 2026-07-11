@@ -244,6 +244,53 @@ export const updateCourseAdmin = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
+// Create a course and its first course admin in one step (Super Admin flow).
+export const createCourseWithAdmin = createServerFn({ method: "POST" })
+  .inputValidator((input: unknown) =>
+    z.object({
+      token: tok,
+      course_name: z.string().trim().min(1).max(120),
+      username: z.string().trim().min(3).max(60).regex(/^[a-zA-Z0-9_.-]+$/, "İstifadəçi adı yalnız hərf, rəqəm, _ . - ola bilər"),
+      password: z.string().min(4).max(200),
+      is_active: z.boolean().optional().default(true),
+    }).parse(input),
+  )
+  .handler(async ({ data }) => {
+    const { requireSuper } = await import("@/lib/tenant.server");
+    const { hashPassword } = await import("@/lib/auth.server");
+    const { supabaseAdmin } = await requireSuper(data.token);
+
+    const baseSlug =
+      data.course_name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+        .slice(0, 50) || "kurs";
+    const slug = `${baseSlug}-${Math.random().toString(36).slice(2, 6)}`;
+
+    const { data: course, error: cErr } = await supabaseAdmin
+      .from("courses")
+      .insert({ name: data.course_name, slug } as never)
+      .select("id")
+      .single();
+    if (cErr) {
+      if (cErr.code === "23505") throw new Error("Bu kurs adı artıq mövcuddur.");
+      throw new Error(cErr.message);
+    }
+
+    const password_hash = await hashPassword(data.password);
+    const { error: aErr } = await supabaseAdmin
+      .from("course_admins")
+      .insert({ course_id: course.id, username: data.username, password_hash, is_active: data.is_active } as never);
+    if (aErr) {
+      // Roll back the orphaned course so the super admin can retry cleanly.
+      await supabaseAdmin.from("courses").delete().eq("id", course.id);
+      if (aErr.code === "23505") throw new Error("Bu istifadəçi adı artıq mövcuddur.");
+      throw new Error(aErr.message);
+    }
+    return { ok: true, course_id: course.id };
+  });
+
 export const deleteCourseAdmin = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) => z.object({ token: tok, id: z.string().uuid() }).parse(input))
   .handler(async ({ data }) => {
