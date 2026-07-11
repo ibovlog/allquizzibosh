@@ -88,7 +88,7 @@ export const getSuperData = createServerFn({ method: "POST" })
 
     const [courses, admins, assessmentCount, participantCount, activeParticipants] = await Promise.all([
       supabaseAdmin.from("courses").select("id, name, slug, is_active, logo_url, primary_color, login_title, login_subtitle, created_at").order("created_at", { ascending: true }),
-      supabaseAdmin.from("course_admins").select("id, course_id, username, is_active, created_at").order("created_at", { ascending: true }),
+      supabaseAdmin.from("course_admins").select("id, course_id, username, is_active, created_at, last_login_at").order("created_at", { ascending: true }),
       supabaseAdmin.from("assessments").select("id, course_id"),
       supabaseAdmin.from("participants").select("id, course_id, completed"),
       supabaseAdmin.from("access_keys").select("id, course_id, completed"),
