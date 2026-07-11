@@ -46,6 +46,11 @@ export const adminLogin = createServerFn({ method: "POST" })
       .maybeSingle();
     if (!course || !course.is_active) return { ok: false as const, reason: "Bu kurs deaktiv edilib." };
 
+    await supabaseAdmin
+      .from("course_admins")
+      .update({ last_login_at: new Date().toISOString() } as never)
+      .eq("id", admin.id);
+
     const token = await signSession({ role: "course", courseId: admin.course_id, username: admin.username });
     return { ok: true as const, role: "course" as const, token, courseId: course.id, courseName: course.name };
   });
