@@ -1284,7 +1284,7 @@ function SuperDashboard(props: {
                       <Input type="text" value={ePass} onChange={(e) => setEPass(e.target.value)} placeholder="Yeni şifrə" className="rounded-xl" />
                       <div className="flex gap-2">
                         <Button size="sm" className="rounded-xl" onClick={() => saveEdit(a.id)}><Check className="h-4 w-4" /></Button>
-                        <Button size="sm" variant="outline" className="rounded-xl" onClick={() => { setEditId(null); setEUser(""); setePassSafe(setEPass); }}><X className="h-4 w-4" /></Button>
+                        <Button size="sm" variant="outline" className="rounded-xl" onClick={() => { setEditId(null); setEUser(""); setEPass(""); }}><X className="h-4 w-4" /></Button>
                       </div>
                     </div>
                   ) : (
