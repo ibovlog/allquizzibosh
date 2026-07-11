@@ -5,6 +5,7 @@ import {
   ShieldCheck, Upload, Loader2, FileText, Trash2, ArrowLeft, BarChart3, Sparkles,
   FolderPlus, Users, MessageSquare, Plus, Pencil, Lock, Unlock, RotateCcw, Send,
   Check, X, KeyRound, AlertTriangle, Search, Copy, Flag,
+  Crown, LayoutDashboard, GraduationCap, Settings, LogIn, UserPlus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,7 +20,8 @@ import {
   setParticipantBlocked, resetParticipant, deleteParticipant, sendMessage,
   createAccessKeys, setAccessKeyBlocked, resetAccessKey, deleteAccessKey,
   resolveProcessingError, deleteProcessingError, resolveProblemReport, deleteProblemReport,
-  enterCourse, getSuperData,
+  enterCourse, getSuperData, createCourseWithAdmin, updateCourse, deleteCourse,
+  updateCourseAdmin, deleteCourseAdmin,
 } from "@/lib/quiz.functions";
 import { docxToText } from "@/lib/quiz-client";
 import { pdfToImages } from "@/lib/pdf-to-images";
@@ -62,6 +64,21 @@ type ProblemReport = {
   question_text: string | null; seat_number: number | null; access_key: string | null;
   reason: string; status: string; created_at: string;
 };
+type SuperCourse = {
+  id: string; name: string; slug: string; is_active: boolean;
+  logo_url: string | null; primary_color: string | null;
+  login_title: string | null; login_subtitle: string | null; created_at: string;
+};
+type SuperAdminRow = {
+  id: string; course_id: string; username: string; is_active: boolean;
+  created_at: string; last_login_at: string | null;
+};
+type SuperData = {
+  courses: SuperCourse[];
+  admins: SuperAdminRow[];
+  statsByCourse: Record<string, { assessments: number; users: number }>;
+  totals: { courses: number; admins: number; assessments: number; users: number; activeUsers: number };
+};
 
 function AdminPage() {
   const login = useServerFn(adminLogin);
@@ -73,6 +90,11 @@ function AdminPage() {
   const editAssessment = useServerFn(updateAssessment);
   const doEnterCourse = useServerFn(enterCourse);
   const fetchSuper = useServerFn(getSuperData);
+  const addCourseWithAdmin = useServerFn(createCourseWithAdmin);
+  const editCourse = useServerFn(updateCourse);
+  const removeCourse = useServerFn(deleteCourse);
+  const editCourseAdmin = useServerFn(updateCourseAdmin);
+  const removeCourseAdmin = useServerFn(deleteCourseAdmin);
   const removeAssessment = useServerFn(deleteAssessment);
   const storeQuestion = useServerFn(saveQuestion);
   const removeQuestion = useServerFn(deleteQuestion);
@@ -94,8 +116,9 @@ function AdminPage() {
   const [pwInput, setPwInput] = useState("");
   const [role, setRole] = useState<"super" | "course" | null>(null);
   const [courseName, setCourseName] = useState<string | null>(null);
-  const [superCourses, setSuperCourses] = useState<Array<{ id: string; name: string; is_active: boolean }>>([]);
-  const [needCoursePick, setNeedCoursePick] = useState(false);
+  const [superToken, setSuperToken] = useState("");
+  const [superMode, setSuperMode] = useState(false);
+  const [superData, setSuperData] = useState<SuperData | null>(null);
   const [authed, setAuthed] = useState(false);
   const [loggingIn, setLoggingIn] = useState(false);
   const [assessments, setAssessments] = useState<Assessment[]>([]);
@@ -148,9 +171,10 @@ function AdminPage() {
       setRole(res.role);
       setCourseName(res.courseName ?? null);
       if (res.role === "super") {
+        setSuperToken(res.token);
         const sd = await fetchSuper({ data: { token: res.token } });
-        setSuperCourses((sd.courses as Array<{ id: string; name: string; is_active: boolean }>) ?? []);
-        setNeedCoursePick(true);
+        setSuperData(sd as SuperData);
+        setSuperMode(true);
       } else {
         await refresh(res.token);
         setAuthed(true);
@@ -162,18 +186,36 @@ function AdminPage() {
     }
   }
 
-  async function pickCourse(courseId: string) {
+  async function refreshSuper() {
     try {
-      const res = await doEnterCourse({ data: { token, course_id: courseId } });
+      const sd = await fetchSuper({ data: { token: superToken } });
+      setSuperData(sd as SuperData);
+    } catch {
+      toast.error("Məlumatlar yenilənmədi.");
+    }
+  }
+
+  async function enterCoursePanel(courseId: string) {
+    try {
+      const res = await doEnterCourse({ data: { token: superToken, course_id: courseId } });
       if (!res.ok || !res.token) { toast.error("Kursa keçmək alınmadı."); return; }
       setToken(res.token);
       setCourseName(res.courseName ?? null);
+      setSelected("");
       await refresh(res.token);
-      setNeedCoursePick(false);
+      setSuperMode(false);
       setAuthed(true);
     } catch {
       toast.error("Kursa keçmək alınmadı.");
     }
+  }
+
+  function backToSuper() {
+    setAuthed(false);
+    setToken(superToken);
+    setCourseName(null);
+    setSuperMode(true);
+    refreshSuper();
   }
 
   const selectedAssessment = assessments.find((a) => a.id === selected) || null;
@@ -243,6 +285,22 @@ function AdminPage() {
     }
   }
 
+  if (superMode && superData) {
+    return (
+      <SuperDashboard
+        token={superToken}
+        data={superData}
+        onRefresh={refreshSuper}
+        onEnterCourse={enterCoursePanel}
+        createCourseWithAdmin={addCourseWithAdmin}
+        updateCourse={editCourse}
+        deleteCourse={removeCourse}
+        updateCourseAdmin={editCourseAdmin}
+        deleteCourseAdmin={removeCourseAdmin}
+      />
+    );
+  }
+
   if (!authed) {
     return (
       <main className="relative flex min-h-screen items-center justify-center bg-background px-4">
@@ -253,38 +311,18 @@ function AdminPage() {
             <ShieldCheck className="h-7 w-7" />
           </div>
           <h1 className="mt-5 text-center text-2xl font-bold text-foreground">Admin girişi</h1>
-          {needCoursePick ? (
-            <>
-              <p className="mt-1 text-center text-sm text-muted-foreground">Super Admin — idarə etmək üçün kurs seçin.</p>
-              <div className="mt-6 space-y-2 max-h-80 overflow-auto">
-                {superCourses.length === 0 && (
-                  <p className="text-center text-sm text-muted-foreground">Hələ kurs yoxdur. Əvvəlcə kurs yaradın (tezliklə).</p>
-                )}
-                {superCourses.map((c) => (
-                  <Button key={c.id} variant="outline" onClick={() => pickCourse(c.id)}
-                    className="h-11 w-full justify-between rounded-xl">
-                    <span>{c.name}</span>
-                    <span className="text-xs text-muted-foreground">{c.is_active ? "aktiv" : "deaktiv"}</span>
-                  </Button>
-                ))}
-              </div>
-            </>
-          ) : (
-            <>
-              <p className="mt-1 text-center text-sm text-muted-foreground">İstifadəçi adı və şifrə ilə daxil olun (Super Admin üçün yalnız şifrə).</p>
-              <div className="mt-6 space-y-4">
-                <Input type="text" placeholder="İstifadəçi adı (Super Admin üçün boş)" value={userInput}
-                  onChange={(e) => setUserInput(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && doLogin()} className="h-12 rounded-xl" />
-                <Input type="password" placeholder="Şifrə" value={pwInput}
-                  onChange={(e) => setPwInput(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && doLogin()} className="h-12 rounded-xl" />
-                <Button onClick={doLogin} disabled={loggingIn} className="h-12 w-full rounded-xl text-base font-semibold">
-                  {loggingIn ? <Loader2 className="h-5 w-5 animate-spin" /> : "Daxil ol"}
-                </Button>
-              </div>
-            </>
-          )}
+          <p className="mt-1 text-center text-sm text-muted-foreground">İstifadəçi adı və şifrə ilə daxil olun (Super Admin üçün yalnız şifrə).</p>
+          <div className="mt-6 space-y-4">
+            <Input type="text" placeholder="İstifadəçi adı (Super Admin üçün boş)" value={userInput}
+              onChange={(e) => setUserInput(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && doLogin()} className="h-12 rounded-xl" />
+            <Input type="password" placeholder="Şifrə" value={pwInput}
+              onChange={(e) => setPwInput(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && doLogin()} className="h-12 rounded-xl" />
+            <Button onClick={doLogin} disabled={loggingIn} className="h-12 w-full rounded-xl text-base font-semibold">
+              {loggingIn ? <Loader2 className="h-5 w-5 animate-spin" /> : "Daxil ol"}
+            </Button>
+          </div>
           <div className="mt-6 text-center">
             <Link to="/" className="text-sm font-medium text-muted-foreground hover:text-primary">← Quiz səhifəsinə qayıt</Link>
           </div>
@@ -298,10 +336,17 @@ function AdminPage() {
       <div className="mx-auto max-w-5xl px-4 py-8">
         <div className="mb-6 flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-foreground">Admin paneli</h1>
+            <h1 className="text-2xl font-bold text-foreground">Admin paneli{courseName ? ` — ${courseName}` : ""}</h1>
             <p className="text-sm text-muted-foreground">Assessmentlər, suallar, açarlar, iştirakçılar.</p>
           </div>
-          <Link to="/"><Button variant="outline" className="rounded-xl"><ArrowLeft className="mr-1 h-4 w-4" />Quiz</Button></Link>
+          <div className="flex items-center gap-2">
+            {role === "super" && (
+              <Button variant="outline" className="rounded-xl" onClick={backToSuper}>
+                <Crown className="mr-1 h-4 w-4" />Super panel
+              </Button>
+            )}
+            <Link to="/"><Button variant="outline" className="rounded-xl"><ArrowLeft className="mr-1 h-4 w-4" />Quiz</Button></Link>
+          </div>
         </div>
 
         {assessments.length > 0 && (
@@ -1016,5 +1061,318 @@ function Empty({ icon, text }: { icon: React.ReactNode; text: string }) {
       <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-secondary text-muted-foreground">{icon}</div>
       <p className="mt-3 text-sm text-muted-foreground">{text}</p>
     </div>
+  );
+}
+
+// ===========================================================================
+// SUPER ADMIN DASHBOARD
+// ===========================================================================
+type Callable = (args: { data: Record<string, unknown> }) => Promise<unknown>;
+
+function fmtDate(v: string | null): string {
+  if (!v) return "—";
+  try {
+    return new Date(v).toLocaleString("az-AZ", {
+      day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit",
+    });
+  } catch { return "—"; }
+}
+
+function StatCard({ icon, label, value }: { icon: React.ReactNode; label: string; value: number | string }) {
+  return (
+    <div className="rounded-2xl border border-border bg-card p-5" style={{ boxShadow: "var(--shadow-card)" }}>
+      <div className="flex items-center gap-3">
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">{icon}</div>
+        <div>
+          <p className="text-2xl font-bold text-foreground">{value}</p>
+          <p className="text-xs text-muted-foreground">{label}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SuperDashboard(props: {
+  token: string;
+  data: SuperData;
+  onRefresh: () => Promise<void> | void;
+  onEnterCourse: (courseId: string) => void;
+  createCourseWithAdmin: Callable;
+  updateCourse: Callable;
+  deleteCourse: Callable;
+  updateCourseAdmin: Callable;
+  deleteCourseAdmin: Callable;
+}) {
+  const { token, data, onRefresh, onEnterCourse } = props;
+  const courseName = (id: string) => data.courses.find((c) => c.id === id)?.name ?? "—";
+
+  // create course-admin form
+  const [cName, setCName] = useState("");
+  const [cUser, setCUser] = useState("");
+  const [cPass, setCPass] = useState("");
+  const [cActive, setCActive] = useState(true);
+  const [creating, setCreating] = useState(false);
+
+  // edit admin
+  const [editId, setEditId] = useState<string | null>(null);
+  const [eUser, setEUser] = useState("");
+  const [ePass, setEPass] = useState("");
+
+  async function handleCreate() {
+    if (!cName.trim() || !cUser.trim() || !cPass.trim()) {
+      toast.error("Kurs adı, istifadəçi adı və şifrə tələb olunur."); return;
+    }
+    setCreating(true);
+    try {
+      await props.createCourseWithAdmin({ data: { token, course_name: cName.trim(), username: cUser.trim(), password: cPass, is_active: cActive } });
+      setCName(""); setCUser(""); setCPass(""); setCActive(true);
+      await onRefresh();
+      toast.success("Kurs və admin yaradıldı.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Xəta baş verdi.");
+    } finally { setCreating(false); }
+  }
+
+  async function toggleAdmin(id: string, is_active: boolean) {
+    try {
+      await props.updateCourseAdmin({ data: { token, id, is_active } });
+      await onRefresh();
+    } catch (err) { toast.error(err instanceof Error ? err.message : "Xəta baş verdi."); }
+  }
+
+  async function saveEdit(id: string) {
+    const patch: Record<string, unknown> = { token, id };
+    if (eUser.trim()) patch.username = eUser.trim();
+    if (ePass.trim()) patch.password = ePass;
+    if (!eUser.trim() && !ePass.trim()) { setEditId(null); return; }
+    try {
+      await props.updateCourseAdmin({ data: patch });
+      setEditId(null); setEUser(""); setEPass("");
+      await onRefresh();
+      toast.success("Yeniləndi.");
+    } catch (err) { toast.error(err instanceof Error ? err.message : "Xəta baş verdi."); }
+  }
+
+  async function delAdmin(id: string) {
+    if (!confirm("Bu admini silmək istəyirsiniz?")) return;
+    try {
+      await props.deleteCourseAdmin({ data: { token, id } });
+      await onRefresh();
+      toast.success("Admin silindi.");
+    } catch (err) { toast.error(err instanceof Error ? err.message : "Xəta baş verdi."); }
+  }
+
+  async function toggleCourse(id: string, is_active: boolean) {
+    try {
+      await props.updateCourse({ data: { token, id, is_active } });
+      await onRefresh();
+    } catch (err) { toast.error(err instanceof Error ? err.message : "Xəta baş verdi."); }
+  }
+
+  async function delCourse(id: string) {
+    if (!confirm("Kurs və ona aid BÜTÜN məlumatlar (assessmentlər, suallar, nəticələr) silinəcək. Davam edilsin?")) return;
+    try {
+      await props.deleteCourse({ data: { token, id } });
+      await onRefresh();
+      toast.success("Kurs silindi.");
+    } catch (err) { toast.error(err instanceof Error ? err.message : "Xəta baş verdi."); }
+  }
+
+  return (
+    <main className="min-h-screen bg-background">
+      <div className="mx-auto max-w-5xl px-4 py-8">
+        <div className="mb-6 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+              <Crown className="h-6 w-6" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold text-foreground">Super Admin</h1>
+              <p className="text-sm text-muted-foreground">Sistem idarəetmə paneli</p>
+            </div>
+          </div>
+          <Link to="/"><Button variant="outline" className="rounded-xl"><ArrowLeft className="mr-1 h-4 w-4" />Quiz</Button></Link>
+        </div>
+
+        <Tabs defaultValue="stats">
+          <TabsList className="mb-6 flex h-auto flex-wrap gap-1">
+            <TabsTrigger value="stats"><LayoutDashboard className="mr-1 h-4 w-4" />Statistika</TabsTrigger>
+            <TabsTrigger value="courses"><GraduationCap className="mr-1 h-4 w-4" />Kurslar</TabsTrigger>
+            <TabsTrigger value="admins"><Users className="mr-1 h-4 w-4" />Kurs Adminləri</TabsTrigger>
+            <TabsTrigger value="users"><Users className="mr-1 h-4 w-4" />İstifadəçilər</TabsTrigger>
+            <TabsTrigger value="reports"><BarChart3 className="mr-1 h-4 w-4" />Hesabatlar</TabsTrigger>
+            <TabsTrigger value="settings"><Settings className="mr-1 h-4 w-4" />Sistem ayarları</TabsTrigger>
+          </TabsList>
+
+          {/* STATS */}
+          <TabsContent value="stats" className="space-y-4">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+              <StatCard icon={<GraduationCap className="h-5 w-5" />} label="Kurslar" value={data.totals.courses} />
+              <StatCard icon={<Users className="h-5 w-5" />} label="Kurs adminləri" value={data.totals.admins} />
+              <StatCard icon={<FileText className="h-5 w-5" />} label="Assessmentlər" value={data.totals.assessments} />
+              <StatCard icon={<Users className="h-5 w-5" />} label="İstifadəçilər" value={data.totals.users} />
+              <StatCard icon={<BarChart3 className="h-5 w-5" />} label="Aktiv istifadəçilər" value={data.totals.activeUsers} />
+            </div>
+          </TabsContent>
+
+          {/* COURSES */}
+          <TabsContent value="courses" className="space-y-3">
+            {data.courses.length === 0 && <Empty icon={<GraduationCap className="h-5 w-5" />} text="Hələ kurs yoxdur. 'Kurs Adminləri' bölməsindən yeni kurs və admin yaradın." />}
+            {data.courses.map((c) => {
+              const st = data.statsByCourse[c.id] || { assessments: 0, users: 0 };
+              return (
+                <div key={c.id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border bg-card p-4">
+                  <div>
+                    <p className="font-semibold text-foreground">{c.name}</p>
+                    <p className="text-xs text-muted-foreground">{st.assessments} assessment · {st.users} istifadəçi · yaradılıb {fmtDate(c.created_at)}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className={cn("rounded-full px-2.5 py-1 text-xs font-medium", c.is_active ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive")}>
+                      {c.is_active ? "Aktiv" : "Deaktiv"}
+                    </span>
+                    <Button size="sm" variant="outline" className="rounded-xl" onClick={() => toggleCourse(c.id, !c.is_active)}>
+                      {c.is_active ? <Lock className="h-4 w-4" /> : <Unlock className="h-4 w-4" />}
+                    </Button>
+                    <Button size="sm" variant="outline" className="rounded-xl" onClick={() => onEnterCourse(c.id)}>
+                      <LogIn className="mr-1 h-4 w-4" />Kursa keç
+                    </Button>
+                    <Button size="sm" variant="outline" className="rounded-xl text-destructive" onClick={() => delCourse(c.id)}>
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
+          </TabsContent>
+
+          {/* ADMINS */}
+          <TabsContent value="admins" className="space-y-6">
+            <div className="rounded-2xl border border-border bg-card p-5" style={{ boxShadow: "var(--shadow-card)" }}>
+              <h3 className="flex items-center gap-2 font-semibold text-foreground"><UserPlus className="h-4 w-4" />Yeni Kurs Admini</h3>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <div>
+                  <Label className="text-xs">Kurs adı</Label>
+                  <Input value={cName} onChange={(e) => setCName(e.target.value)} placeholder="Məs: Riyaziyyat kursu" className="mt-1 rounded-xl" />
+                </div>
+                <div>
+                  <Label className="text-xs">İstifadəçi adı</Label>
+                  <Input value={cUser} onChange={(e) => setCUser(e.target.value)} placeholder="məs: riyaziyyat_admin" className="mt-1 rounded-xl" />
+                </div>
+                <div>
+                  <Label className="text-xs">Şifrə</Label>
+                  <Input type="text" value={cPass} onChange={(e) => setCPass(e.target.value)} placeholder="Şifrə" className="mt-1 rounded-xl" />
+                </div>
+                <div className="flex items-end">
+                  <label className="flex items-center gap-2 text-sm text-foreground">
+                    <input type="checkbox" checked={cActive} onChange={(e) => setCActive(e.target.checked)} className="h-4 w-4 rounded" />
+                    Aktiv
+                  </label>
+                </div>
+              </div>
+              <Button onClick={handleCreate} disabled={creating} className="mt-4 rounded-xl">
+                {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <><Plus className="mr-1 h-4 w-4" />Yarat</>}
+              </Button>
+            </div>
+
+            {data.admins.length === 0 && <Empty icon={<Users className="h-5 w-5" />} text="Hələ kurs admini yoxdur." />}
+            <div className="space-y-3">
+              {data.admins.map((a) => (
+                <div key={a.id} className="rounded-2xl border border-border bg-card p-4">
+                  {editId === a.id ? (
+                    <div className="grid gap-3 sm:grid-cols-3">
+                      <Input value={eUser} onChange={(e) => setEUser(e.target.value)} placeholder="Yeni istifadəçi adı" className="rounded-xl" />
+                      <Input type="text" value={ePass} onChange={(e) => setEPass(e.target.value)} placeholder="Yeni şifrə" className="rounded-xl" />
+                      <div className="flex gap-2">
+                        <Button size="sm" className="rounded-xl" onClick={() => saveEdit(a.id)}><Check className="h-4 w-4" /></Button>
+                        <Button size="sm" variant="outline" className="rounded-xl" onClick={() => { setEditId(null); setEUser(""); setEPass(""); }}><X className="h-4 w-4" /></Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className="font-semibold text-foreground">{a.username}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {courseName(a.course_id)} · yaradılıb {fmtDate(a.created_at)} · son giriş {fmtDate(a.last_login_at)}
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className={cn("rounded-full px-2.5 py-1 text-xs font-medium", a.is_active ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive")}>
+                          {a.is_active ? "Aktiv" : "Deaktiv"}
+                        </span>
+                        <Button size="sm" variant="outline" className="rounded-xl" onClick={() => { setEditId(a.id); setEUser(a.username); setEPass(""); }}>
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button size="sm" variant="outline" className="rounded-xl" onClick={() => toggleAdmin(a.id, !a.is_active)}>
+                          {a.is_active ? <Lock className="h-4 w-4" /> : <Unlock className="h-4 w-4" />}
+                        </Button>
+                        <Button size="sm" variant="outline" className="rounded-xl" onClick={() => onEnterCourse(a.course_id)}>
+                          <LogIn className="mr-1 h-4 w-4" />Panel
+                        </Button>
+                        <Button size="sm" variant="outline" className="rounded-xl text-destructive" onClick={() => delAdmin(a.id)}>
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </TabsContent>
+
+          {/* USERS OVERVIEW */}
+          <TabsContent value="users" className="space-y-3">
+            <p className="text-sm text-muted-foreground">Kurslar üzrə istifadəçi sayları. Detallar üçün kursa keçin.</p>
+            {data.courses.map((c) => {
+              const st = data.statsByCourse[c.id] || { assessments: 0, users: 0 };
+              return (
+                <div key={c.id} className="flex items-center justify-between rounded-2xl border border-border bg-card p-4">
+                  <div>
+                    <p className="font-semibold text-foreground">{c.name}</p>
+                    <p className="text-xs text-muted-foreground">{st.users} istifadəçi</p>
+                  </div>
+                  <Button size="sm" variant="outline" className="rounded-xl" onClick={() => onEnterCourse(c.id)}><LogIn className="mr-1 h-4 w-4" />Bax</Button>
+                </div>
+              );
+            })}
+          </TabsContent>
+
+          {/* REPORTS OVERVIEW */}
+          <TabsContent value="reports" className="space-y-3">
+            <p className="text-sm text-muted-foreground">Kurslar üzrə ümumi hesabat. Ətraflı nəticə və problem hesabatları üçün kursa keçin.</p>
+            {data.courses.map((c) => {
+              const st = data.statsByCourse[c.id] || { assessments: 0, users: 0 };
+              return (
+                <div key={c.id} className="flex items-center justify-between rounded-2xl border border-border bg-card p-4">
+                  <div>
+                    <p className="font-semibold text-foreground">{c.name}</p>
+                    <p className="text-xs text-muted-foreground">{st.assessments} assessment · {st.users} istifadəçi</p>
+                  </div>
+                  <Button size="sm" variant="outline" className="rounded-xl" onClick={() => onEnterCourse(c.id)}><BarChart3 className="mr-1 h-4 w-4" />Hesabatlar</Button>
+                </div>
+              );
+            })}
+          </TabsContent>
+
+          {/* SETTINGS */}
+          <TabsContent value="settings" className="space-y-4">
+            <div className="rounded-2xl border border-border bg-card p-5">
+              <h3 className="font-semibold text-foreground">Sistem məlumatı</h3>
+              <ul className="mt-3 space-y-2 text-sm text-muted-foreground">
+                <li>Cəmi kurs: <span className="font-medium text-foreground">{data.totals.courses}</span></li>
+                <li>Cəmi kurs admini: <span className="font-medium text-foreground">{data.totals.admins}</span></li>
+                <li>Cəmi assessment: <span className="font-medium text-foreground">{data.totals.assessments}</span></li>
+                <li>Super Admin girişi: <span className="font-medium text-foreground">yalnız master şifrə ilə</span></li>
+              </ul>
+              <Button variant="outline" className="mt-4 rounded-xl" onClick={() => onRefresh()}>
+                <RotateCcw className="mr-1 h-4 w-4" />Məlumatları yenilə
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Qeyd: Super Admin şifrəsi sistem parametrlərində (ADMIN_PASSWORD) saxlanılır və buradan dəyişdirilmir.
+            </p>
+          </TabsContent>
+        </Tabs>
+      </div>
+    </main>
   );
 }

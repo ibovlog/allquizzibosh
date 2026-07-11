@@ -1,0 +1,1 @@
+ALTER TABLE public.course_admins ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMP WITH TIME ZONE;
