@@ -171,9 +171,10 @@ function AdminPage() {
       setRole(res.role);
       setCourseName(res.courseName ?? null);
       if (res.role === "super") {
+        setSuperToken(res.token);
         const sd = await fetchSuper({ data: { token: res.token } });
-        setSuperCourses((sd.courses as Array<{ id: string; name: string; is_active: boolean }>) ?? []);
-        setNeedCoursePick(true);
+        setSuperData(sd as SuperData);
+        setSuperMode(true);
       } else {
         await refresh(res.token);
         setAuthed(true);
@@ -185,18 +186,36 @@ function AdminPage() {
     }
   }
 
-  async function pickCourse(courseId: string) {
+  async function refreshSuper() {
     try {
-      const res = await doEnterCourse({ data: { token, course_id: courseId } });
+      const sd = await fetchSuper({ data: { token: superToken } });
+      setSuperData(sd as SuperData);
+    } catch {
+      toast.error("Məlumatlar yenilənmədi.");
+    }
+  }
+
+  async function enterCoursePanel(courseId: string) {
+    try {
+      const res = await doEnterCourse({ data: { token: superToken, course_id: courseId } });
       if (!res.ok || !res.token) { toast.error("Kursa keçmək alınmadı."); return; }
       setToken(res.token);
       setCourseName(res.courseName ?? null);
+      setSelected("");
       await refresh(res.token);
-      setNeedCoursePick(false);
+      setSuperMode(false);
       setAuthed(true);
     } catch {
       toast.error("Kursa keçmək alınmadı.");
     }
+  }
+
+  function backToSuper() {
+    setAuthed(false);
+    setToken(superToken);
+    setCourseName(null);
+    setSuperMode(true);
+    refreshSuper();
   }
 
   const selectedAssessment = assessments.find((a) => a.id === selected) || null;
