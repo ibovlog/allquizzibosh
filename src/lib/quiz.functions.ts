@@ -189,6 +189,15 @@ export const deleteCourse = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { requireSuper } = await import("@/lib/tenant.server");
     const { supabaseAdmin } = await requireSuper(data.token);
+    // Remove all course-scoped data first (in case FKs are not ON DELETE CASCADE).
+    const childTables = [
+      "questions", "quiz_results", "problem_reports", "processing_errors",
+      "admin_messages", "participants", "access_keys", "assessments",
+      "course_admins",
+    ] as const;
+    for (const t of childTables) {
+      await supabaseAdmin.from(t).delete().eq("course_id", data.id);
+    }
     const { error } = await supabaseAdmin.from("courses").delete().eq("id", data.id);
     if (error) throw new Error(error.message);
     return { ok: true };
