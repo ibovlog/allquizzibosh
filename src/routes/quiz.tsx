@@ -28,6 +28,7 @@ type Config = {
   accessKey: string | null;
   participantId: string | null;
   accessKeyId: string | null;
+  studentToken: string;
   count: number;
   order: "sequential" | "random";
   rangeStart: number | null;
@@ -194,7 +195,11 @@ function QuizPage() {
     const t = setInterval(async () => {
       try {
         const res = await pollBlocked({
-          data: { participant_id: config.participantId, access_key_id: config.accessKeyId },
+          data: {
+            student_token: config.studentToken,
+            participant_id: config.participantId,
+            access_key_id: config.accessKeyId,
+          },
         });
         if (res.blocked) kick("Girişiniz admin tərəfindən bloklandı.");
       } catch {
@@ -213,6 +218,7 @@ function QuizPage() {
     saveTimer.current = setTimeout(() => {
       persist({
         data: {
+          student_token: config.studentToken,
           participant_id: config.participantId,
           access_key_id: config.accessKeyId,
           current_index: current,
@@ -250,6 +256,7 @@ function QuizPage() {
     try {
       const res = await finalize({
         data: {
+          student_token: config.studentToken,
           assessment_id: config.assessmentId,
           participant_id: config.participantId,
           access_key_id: config.accessKeyId,
@@ -284,6 +291,7 @@ function QuizPage() {
     try {
       await sendReport({
         data: {
+          student_token: config.studentToken,
           assessment_id: config.assessmentId,
           seat_number: config.seat,
           pdf_number: questions[current]?.pdf_number ?? null,

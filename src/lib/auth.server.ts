@@ -1,8 +1,8 @@
 // Server-only auth helpers: password hashing + signed session tokens.
 // Uses Web Crypto (available in the Worker runtime).
 
-const DEFAULT_ADMIN_PASSWORD = "admin123";
 const TOKEN_TTL_MS = 1000 * 60 * 60 * 12; // 12 hours
+const STUDENT_TTL_MS = 1000 * 60 * 60 * 6; // 6 hours
 
 export type Role = "super" | "course";
 export type Session = {
@@ -15,7 +15,13 @@ export type Session = {
 };
 
 function getSecret(): string {
-  return process.env.SESSION_SECRET || process.env.ADMIN_PASSWORD || DEFAULT_ADMIN_PASSWORD;
+  const secret = process.env.SESSION_SECRET || process.env.ADMIN_PASSWORD;
+  if (!secret) {
+    throw new Error(
+      "Server misconfigured: SESSION_SECRET (or ADMIN_PASSWORD) is not set.",
+    );
+  }
+  return secret;
 }
 
 function b64urlEncode(bytes: Uint8Array): string {
@@ -104,4 +110,38 @@ export async function verifySession(token: string): Promise<Session> {
 // Re-sign a session with a new courseId override (super admin entering a course).
 export async function reissueWithCourse(session: Session, courseId: string | null): Promise<string> {
   return signSession({ role: session.role, courseId, username: session.username });
+}
+
+// --- Student attempt tokens ------------------------------------------------
+// Issued by joinQuiz after identity/device checks. Proves that the caller owns
+// the participant / access-key row it is writing to.
+export type StudentSession = {
+  assessmentId: string;
+  participantId: string | null;
+  accessKeyId: string | null;
+  exp: number;
+};
+
+export async function signStudentToken(
+  payload: Omit<StudentSession, "exp">,
+): Promise<string> {
+  const full: StudentSession = { ...payload, exp: Date.now() + STUDENT_TTL_MS };
+  const body = b64urlEncode(new TextEncoder().encode(JSON.stringify(full)));
+  const sig = await hmac("student:" + body);
+  return `${body}.${sig}`;
+}
+
+export async function verifyStudentToken(token: string): Promise<StudentSession> {
+  const [body, sig] = (token || "").split(".");
+  if (!body || !sig) throw new Error("UNAUTHORIZED");
+  const expected = await hmac("student:" + body);
+  if (!timingSafeEqual(sig, expected)) throw new Error("UNAUTHORIZED");
+  let parsed: StudentSession;
+  try {
+    parsed = JSON.parse(new TextDecoder().decode(b64urlDecode(body)));
+  } catch {
+    throw new Error("UNAUTHORIZED");
+  }
+  if (!parsed.exp || parsed.exp < Date.now()) throw new Error("SESSION_EXPIRED");
+  return parsed;
 }

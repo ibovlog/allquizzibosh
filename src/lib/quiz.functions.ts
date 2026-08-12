@@ -3,6 +3,22 @@ import { z } from "zod";
 
 const NIL_UUID = "00000000-0000-0000-0000-000000000000";
 
+// Verifies a student attempt token and that the ids the client claims match
+// the ones the server issued at join time.
+async function assertStudent(
+  token: string,
+  participantId?: string | null,
+  accessKeyId?: string | null,
+  assessmentId?: string | null,
+) {
+  const { verifyStudentToken } = await import("@/lib/auth.server");
+  const s = await verifyStudentToken(token);
+  if (participantId && participantId !== s.participantId) throw new Error("UNAUTHORIZED");
+  if (accessKeyId && accessKeyId !== s.accessKeyId) throw new Error("UNAUTHORIZED");
+  if (assessmentId && assessmentId !== s.assessmentId) throw new Error("UNAUTHORIZED");
+  return s;
+}
+
 const tok = z.string().min(1).max(4000);
 const pw = z.string().min(1).max(200);
 const optionSchema = z.array(z.string().min(1).max(2000)).min(2).max(8);
@@ -20,7 +36,10 @@ export const adminLogin = createServerFn({ method: "POST" })
     const { signSession } = await import("@/lib/auth.server");
     const { verifyPassword } = await import("@/lib/auth.server");
 
-    const superPw = process.env.ADMIN_PASSWORD || "admin123";
+    const superPw = process.env.ADMIN_PASSWORD;
+    if (!superPw) {
+      throw new Error("Server misconfigured: ADMIN_PASSWORD is not set.");
+    }
     // Super admin: correct master password (username ignored / "super"/"admin").
     const uname = data.username.trim();
     const looksSuper = uname === "" || uname.toLowerCase() === "super" || uname.toLowerCase() === "admin";
@@ -982,6 +1001,11 @@ export const joinQuiz = createServerFn({ method: "POST" })
       },
       participantId,
       accessKeyId,
+      studentToken: await (await import("@/lib/auth.server")).signStudentToken({
+        assessmentId: assessment.id,
+        participantId,
+        accessKeyId,
+      }),
       resumeIndex,
       resumeAnswers,
       attemptNumber,
@@ -993,6 +1017,7 @@ export const saveProgress = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) =>
     z
       .object({
+        student_token: tok,
         participant_id: z.string().uuid().nullable().optional(),
         access_key_id: z.string().uuid().nullable().optional(),
         current_index: z.number().int().min(0).max(2000),
@@ -1002,12 +1027,13 @@ export const saveProgress = createServerFn({ method: "POST" })
   )
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const s = await assertStudent(data.student_token, data.participant_id, data.access_key_id);
     const patch = { current_index: data.current_index, answers: data.answers };
-    if (data.participant_id) {
-      await supabaseAdmin.from("participants").update(patch as never).eq("id", data.participant_id);
+    if (s.participantId) {
+      await supabaseAdmin.from("participants").update(patch as never).eq("id", s.participantId);
     }
-    if (data.access_key_id) {
-      await supabaseAdmin.from("access_keys").update(patch as never).eq("id", data.access_key_id);
+    if (s.accessKeyId) {
+      await supabaseAdmin.from("access_keys").update(patch as never).eq("id", s.accessKeyId);
     }
     return { ok: true };
   });
@@ -1016,6 +1042,7 @@ export const checkBlocked = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) =>
     z
       .object({
+        student_token: tok,
         participant_id: z.string().uuid().nullable().optional(),
         access_key_id: z.string().uuid().nullable().optional(),
       })
@@ -1023,20 +1050,21 @@ export const checkBlocked = createServerFn({ method: "POST" })
   )
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const s = await assertStudent(data.student_token, data.participant_id, data.access_key_id);
     let blocked = false;
-    if (data.participant_id) {
+    if (s.participantId) {
       const { data: p } = await supabaseAdmin
         .from("participants")
         .select("blocked")
-        .eq("id", data.participant_id)
+        .eq("id", s.participantId)
         .maybeSingle();
       if (p?.blocked) blocked = true;
     }
-    if (data.access_key_id) {
+    if (s.accessKeyId) {
       const { data: k } = await supabaseAdmin
         .from("access_keys")
         .select("blocked")
-        .eq("id", data.access_key_id)
+        .eq("id", s.accessKeyId)
         .maybeSingle();
       if (k?.blocked) blocked = true;
     }
@@ -1076,6 +1104,7 @@ export const reportProblem = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) =>
     z
       .object({
+        student_token: tok,
         assessment_id: z.string().uuid(),
         seat_number: z.number().int().min(1).max(100000).nullable().optional(),
         pdf_number: z.number().int().nullable().optional(),
@@ -1088,6 +1117,7 @@ export const reportProblem = createServerFn({ method: "POST" })
   )
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    await assertStudent(data.student_token, null, null, data.assessment_id);
     const { data: a } = await supabaseAdmin.from("assessments").select("course_id").eq("id", data.assessment_id).maybeSingle();
     const courseId = (a as { course_id?: string } | null)?.course_id ?? null;
     await supabaseAdmin.from("problem_reports").insert({
@@ -1146,6 +1176,7 @@ export const finishAttempt = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) =>
     z
       .object({
+        student_token: tok,
         assessment_id: z.string().uuid(),
         participant_id: z.string().uuid().nullable().optional(),
         access_key_id: z.string().uuid().nullable().optional(),
@@ -1166,6 +1197,12 @@ export const finishAttempt = createServerFn({ method: "POST" })
   )
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const s = await assertStudent(
+      data.student_token,
+      data.participant_id,
+      data.access_key_id,
+      data.assessment_id,
+    );
     const { data: a } = await supabaseAdmin.from("assessments").select("course_id").eq("id", data.assessment_id).maybeSingle();
     const courseId = (a as { course_id?: string } | null)?.course_id ?? null;
 
@@ -1202,17 +1239,17 @@ export const finishAttempt = createServerFn({ method: "POST" })
       details: details as never,
     } as never);
     if (error) throw new Error(error.message);
-    if (data.participant_id) {
+    if (s.participantId) {
       await supabaseAdmin
         .from("participants")
         .update({ completed: true, attempt_count: data.attempt_number } as never)
-        .eq("id", data.participant_id);
+        .eq("id", s.participantId);
     }
-    if (data.access_key_id) {
+    if (s.accessKeyId) {
       await supabaseAdmin
         .from("access_keys")
         .update({ completed: true, attempt_count: data.attempt_number } as never)
-        .eq("id", data.access_key_id);
+        .eq("id", s.accessKeyId);
     }
     return { ok: true, score, total, blank_count, details };
   });

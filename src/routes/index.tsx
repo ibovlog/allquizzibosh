@@ -175,6 +175,7 @@ function Index() {
           accessKey: needKey ? accessKey.trim() : null,
           participantId: res.participantId,
           accessKeyId: res.accessKeyId,
+          studentToken: res.studentToken,
           count: chosenCount,
           order,
           rangeStart: rStart,
