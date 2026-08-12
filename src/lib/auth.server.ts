@@ -1,8 +1,8 @@
 // Server-only auth helpers: password hashing + signed session tokens.
 // Uses Web Crypto (available in the Worker runtime).
 
-const DEFAULT_ADMIN_PASSWORD = "admin123";
 const TOKEN_TTL_MS = 1000 * 60 * 60 * 12; // 12 hours
+const STUDENT_TTL_MS = 1000 * 60 * 60 * 6; // 6 hours
 
 export type Role = "super" | "course";
 export type Session = {
@@ -15,7 +15,13 @@ export type Session = {
 };
 
 function getSecret(): string {
-  return process.env.SESSION_SECRET || process.env.ADMIN_PASSWORD || DEFAULT_ADMIN_PASSWORD;
+  const secret = process.env.SESSION_SECRET || process.env.ADMIN_PASSWORD;
+  if (!secret) {
+    throw new Error(
+      "Server misconfigured: SESSION_SECRET (or ADMIN_PASSWORD) is not set.",
+    );
+  }
+  return secret;
 }
 
 function b64urlEncode(bytes: Uint8Array): string {
