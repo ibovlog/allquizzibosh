@@ -13,9 +13,9 @@ import { supabase } from "@/integrations/supabase/client";
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "AI Quiz — PDF-dən ağıllı test" },
+      { title: "quizapp-byibosh" },
       { name: "description", content: "PDF və ya Word yükləyin, süni intellekt onu avtomatik test formatına çevirsin. Assessment adı və giriş məlumatınızı daxil edib testə başlayın." },
-      { property: "og:title", content: "AI Quiz — PDF-dən ağıllı test" },
+      { property: "og:title", content: "quizapp-byibosh" },
       { property: "og:description", content: "PDF/Word-dən süni intellektlə yaradılan testlər." },
     ],
   }),
