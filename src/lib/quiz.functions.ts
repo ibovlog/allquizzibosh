@@ -20,7 +20,10 @@ export const adminLogin = createServerFn({ method: "POST" })
     const { signSession } = await import("@/lib/auth.server");
     const { verifyPassword } = await import("@/lib/auth.server");
 
-    const superPw = process.env.ADMIN_PASSWORD || "admin123";
+    const superPw = process.env.ADMIN_PASSWORD;
+    if (!superPw) {
+      throw new Error("Server misconfigured: ADMIN_PASSWORD is not set.");
+    }
     // Super admin: correct master password (username ignored / "super"/"admin").
     const uname = data.username.trim();
     const looksSuper = uname === "" || uname.toLowerCase() === "super" || uname.toLowerCase() === "admin";
