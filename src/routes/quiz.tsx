@@ -291,6 +291,7 @@ function QuizPage() {
     try {
       await sendReport({
         data: {
+          student_token: config.studentToken,
           assessment_id: config.assessmentId,
           seat_number: config.seat,
           pdf_number: questions[current]?.pdf_number ?? null,
