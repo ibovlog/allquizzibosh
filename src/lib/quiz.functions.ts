@@ -3,6 +3,22 @@ import { z } from "zod";
 
 const NIL_UUID = "00000000-0000-0000-0000-000000000000";
 
+// Verifies a student attempt token and that the ids the client claims match
+// the ones the server issued at join time.
+async function assertStudent(
+  token: string,
+  participantId?: string | null,
+  accessKeyId?: string | null,
+  assessmentId?: string | null,
+) {
+  const { verifyStudentToken } = await import("@/lib/auth.server");
+  const s = await verifyStudentToken(token);
+  if (participantId && participantId !== s.participantId) throw new Error("UNAUTHORIZED");
+  if (accessKeyId && accessKeyId !== s.accessKeyId) throw new Error("UNAUTHORIZED");
+  if (assessmentId && assessmentId !== s.assessmentId) throw new Error("UNAUTHORIZED");
+  return s;
+}
+
 const tok = z.string().min(1).max(4000);
 const pw = z.string().min(1).max(200);
 const optionSchema = z.array(z.string().min(1).max(2000)).min(2).max(8);
@@ -985,6 +1001,11 @@ export const joinQuiz = createServerFn({ method: "POST" })
       },
       participantId,
       accessKeyId,
+      studentToken: await (await import("@/lib/auth.server")).signStudentToken({
+        assessmentId: assessment.id,
+        participantId,
+        accessKeyId,
+      }),
       resumeIndex,
       resumeAnswers,
       attemptNumber,
@@ -996,6 +1017,7 @@ export const saveProgress = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) =>
     z
       .object({
+        student_token: tok,
         participant_id: z.string().uuid().nullable().optional(),
         access_key_id: z.string().uuid().nullable().optional(),
         current_index: z.number().int().min(0).max(2000),
@@ -1005,12 +1027,13 @@ export const saveProgress = createServerFn({ method: "POST" })
   )
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const s = await assertStudent(data.student_token, data.participant_id, data.access_key_id);
     const patch = { current_index: data.current_index, answers: data.answers };
-    if (data.participant_id) {
-      await supabaseAdmin.from("participants").update(patch as never).eq("id", data.participant_id);
+    if (s.participantId) {
+      await supabaseAdmin.from("participants").update(patch as never).eq("id", s.participantId);
     }
-    if (data.access_key_id) {
-      await supabaseAdmin.from("access_keys").update(patch as never).eq("id", data.access_key_id);
+    if (s.accessKeyId) {
+      await supabaseAdmin.from("access_keys").update(patch as never).eq("id", s.accessKeyId);
     }
     return { ok: true };
   });
@@ -1019,6 +1042,7 @@ export const checkBlocked = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) =>
     z
       .object({
+        student_token: tok,
         participant_id: z.string().uuid().nullable().optional(),
         access_key_id: z.string().uuid().nullable().optional(),
       })
@@ -1026,20 +1050,21 @@ export const checkBlocked = createServerFn({ method: "POST" })
   )
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const s = await assertStudent(data.student_token, data.participant_id, data.access_key_id);
     let blocked = false;
-    if (data.participant_id) {
+    if (s.participantId) {
       const { data: p } = await supabaseAdmin
         .from("participants")
         .select("blocked")
-        .eq("id", data.participant_id)
+        .eq("id", s.participantId)
         .maybeSingle();
       if (p?.blocked) blocked = true;
     }
-    if (data.access_key_id) {
+    if (s.accessKeyId) {
       const { data: k } = await supabaseAdmin
         .from("access_keys")
         .select("blocked")
-        .eq("id", data.access_key_id)
+        .eq("id", s.accessKeyId)
         .maybeSingle();
       if (k?.blocked) blocked = true;
     }
