@@ -1117,6 +1117,18 @@ function SuperDashboard(props: {
   const [editId, setEditId] = useState<string | null>(null);
   const [eUser, setEUser] = useState("");
   const [ePass, setEPass] = useState("");
+  const [assignPick, setAssignPick] = useState<Record<string, string>>({});
+
+  async function assignAdmin(courseId: string) {
+    const adminId = assignPick[courseId];
+    if (!adminId) { toast.error("Admin seçin."); return; }
+    try {
+      await props.updateCourseAdmin({ data: { token, id: adminId, course_id: courseId } });
+      setAssignPick((p) => ({ ...p, [courseId]: "" }));
+      await onRefresh();
+      toast.success("Admin kursa təyin edildi.");
+    } catch (err) { toast.error(err instanceof Error ? err.message : "Xəta baş verdi."); }
+  }
 
   async function handleCreate() {
     if (!cName.trim() || !cUser.trim() || !cPass.trim()) {
