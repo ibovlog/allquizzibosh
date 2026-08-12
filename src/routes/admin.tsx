@@ -311,7 +311,7 @@ function AdminPage() {
             <ShieldCheck className="h-7 w-7" />
           </div>
           <h1 className="mt-5 text-center text-2xl font-bold text-foreground">Admin girişi</h1>
-          <p className="mt-1 text-center text-sm text-muted-foreground">İstifadəçi adı və şifrə ilə daxil olun (Super Admin üçün yalnız şifrə).</p>
+          <p className="mt-1 text-center text-sm text-muted-foreground">İstifadəçi adı və şifrə ilə daxil olun.</p>
           <div className="mt-6 space-y-4">
             <Input type="text" placeholder="İstifadəçi adı (Super Admin üçün boş)" value={userInput}
               onChange={(e) => setUserInput(e.target.value)}
@@ -1226,7 +1226,7 @@ function SuperDashboard(props: {
                     <p className="font-semibold text-foreground">{c.name}</p>
                     <p className="text-xs text-muted-foreground">{st.assessments} assessment · {st.users} istifadəçi · yaradılıb {fmtDate(c.created_at)}</p>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <span className={cn("rounded-full px-2.5 py-1 text-xs font-medium", c.is_active ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive")}>
                       {c.is_active ? "Aktiv" : "Deaktiv"}
                     </span>
@@ -1239,6 +1239,36 @@ function SuperDashboard(props: {
                     <Button size="sm" variant="outline" className="rounded-xl text-destructive" onClick={() => delCourse(c.id)}>
                       <Trash2 className="h-4 w-4" />
                     </Button>
+                  </div>
+                  <div className="w-full border-t border-border pt-3">
+                    <p className="mb-2 text-xs font-medium text-muted-foreground">Təyin edilmiş adminlər</p>
+                    <div className="mb-2 flex flex-wrap gap-2">
+                      {data.admins.filter((a) => a.course_id === c.id).map((a) => (
+                        <span key={a.id} className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
+                          <UserPlus className="h-3 w-3" />{a.username}{a.is_active ? "" : " (deaktiv)"}
+                        </span>
+                      ))}
+                      {data.admins.filter((a) => a.course_id === c.id).length === 0 && (
+                        <span className="text-xs text-muted-foreground">Admin təyin edilməyib.</span>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <select
+                        value={assignPick[c.id] ?? ""}
+                        onChange={(e) => setAssignPick((p) => ({ ...p, [c.id]: e.target.value }))}
+                        className="h-9 rounded-xl border border-input bg-background px-3 text-sm text-foreground"
+                      >
+                        <option value="">Admin seçin…</option>
+                        {data.admins.map((a) => (
+                          <option key={a.id} value={a.id}>
+                            {a.username}{a.course_id === c.id ? " (bu kursda)" : ` — ${courseName(a.course_id)}`}
+                          </option>
+                        ))}
+                      </select>
+                      <Button size="sm" variant="outline" className="rounded-xl" onClick={() => assignAdmin(c.id)}>
+                        <UserPlus className="mr-1 h-4 w-4" />Təyin et
+                      </Button>
+                    </div>
                   </div>
                 </div>
               );
