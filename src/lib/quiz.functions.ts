@@ -1104,6 +1104,7 @@ export const reportProblem = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) =>
     z
       .object({
+        student_token: tok,
         assessment_id: z.string().uuid(),
         seat_number: z.number().int().min(1).max(100000).nullable().optional(),
         pdf_number: z.number().int().nullable().optional(),
@@ -1116,6 +1117,7 @@ export const reportProblem = createServerFn({ method: "POST" })
   )
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    await assertStudent(data.student_token, null, null, data.assessment_id);
     const { data: a } = await supabaseAdmin.from("assessments").select("course_id").eq("id", data.assessment_id).maybeSingle();
     const courseId = (a as { course_id?: string } | null)?.course_id ?? null;
     await supabaseAdmin.from("problem_reports").insert({
@@ -1174,6 +1176,7 @@ export const finishAttempt = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) =>
     z
       .object({
+        student_token: tok,
         assessment_id: z.string().uuid(),
         participant_id: z.string().uuid().nullable().optional(),
         access_key_id: z.string().uuid().nullable().optional(),
@@ -1194,6 +1197,12 @@ export const finishAttempt = createServerFn({ method: "POST" })
   )
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const s = await assertStudent(
+      data.student_token,
+      data.participant_id,
+      data.access_key_id,
+      data.assessment_id,
+    );
     const { data: a } = await supabaseAdmin.from("assessments").select("course_id").eq("id", data.assessment_id).maybeSingle();
     const courseId = (a as { course_id?: string } | null)?.course_id ?? null;
 
@@ -1230,17 +1239,17 @@ export const finishAttempt = createServerFn({ method: "POST" })
       details: details as never,
     } as never);
     if (error) throw new Error(error.message);
-    if (data.participant_id) {
+    if (s.participantId) {
       await supabaseAdmin
         .from("participants")
         .update({ completed: true, attempt_count: data.attempt_number } as never)
-        .eq("id", data.participant_id);
+        .eq("id", s.participantId);
     }
-    if (data.access_key_id) {
+    if (s.accessKeyId) {
       await supabaseAdmin
         .from("access_keys")
         .update({ completed: true, attempt_count: data.attempt_number } as never)
-        .eq("id", data.access_key_id);
+        .eq("id", s.accessKeyId);
     }
     return { ok: true, score, total, blank_count, details };
   });
