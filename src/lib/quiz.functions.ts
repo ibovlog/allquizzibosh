@@ -235,6 +235,7 @@ export const updateCourseAdmin = createServerFn({ method: "POST" })
       username: z.string().trim().min(3).max(60).regex(/^[a-zA-Z0-9_.-]+$/).optional(),
       password: z.string().min(4).max(200).optional(),
       is_active: z.boolean().optional(),
+      course_id: z.string().uuid().optional(),
     }).parse(input),
   )
   .handler(async ({ data }) => {
@@ -244,6 +245,7 @@ export const updateCourseAdmin = createServerFn({ method: "POST" })
     const patch: Record<string, unknown> = {};
     if (data.username !== undefined) patch.username = data.username;
     if (data.is_active !== undefined) patch.is_active = data.is_active;
+    if (data.course_id !== undefined) patch.course_id = data.course_id;
     if (data.password !== undefined) patch.password_hash = await hashPassword(data.password);
     const { error } = await supabaseAdmin.from("course_admins").update(patch as never).eq("id", data.id);
     if (error) {
