@@ -183,6 +183,13 @@ function Index() {
           resumeIndex: res.resumeIndex ?? 0,
           resumeAnswers: res.resumeAnswers ?? {},
           shuffleOptions: res.assessment.shuffle_options ?? true,
+          security: {
+            enableDarkMode: res.assessment.enable_dark_mode,
+            enableAntiCheat: res.assessment.enable_anti_cheat,
+            maxTabSwitches: res.assessment.max_tab_switches,
+            enableFullscreen: res.assessment.enable_fullscreen,
+            blockCopy: res.assessment.block_copy,
+          },
           attemptNumber: res.attemptNumber ?? 1,
           startedAt: res.startedAt ?? new Date().toISOString(),
         }),

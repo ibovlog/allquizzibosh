@@ -1,0 +1,13 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1791104774955,
+      "tag": "0000_anti_cheat_settings",
+      "breakpoints": true
+    }
+  ]
+}

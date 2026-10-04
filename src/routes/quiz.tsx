@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { CheckCircle2, Trophy, ArrowLeft, ArrowRight, Loader2, Bell, Flag, XCircle, Check, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ExamGuard, type ExamSecurity } from "@/components/ExamGuard";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
@@ -38,6 +39,7 @@ type Config = {
   shuffleOptions: boolean;
   attemptNumber: number;
   startedAt: string;
+  security?: ExamSecurity;
 };
 
 type Msg = { id: string; body: string; kind: string; created_at: string };
@@ -150,6 +152,10 @@ function QuizPage() {
     },
     [navigate],
   );
+
+  const terminateCheat = useCallback(() => {
+    kick("Qaydalar pozuldu: limitdən çox pəncərə dəyişdiyiniz üçün imtahan bağlandı.");
+  }, [kick]);
 
   // Realtime: admin messages + instant block via participants table.
   useEffect(() => {
@@ -436,6 +442,12 @@ function QuizPage() {
 
   return (
     <main className="min-h-screen bg-background">
+      <ExamGuard
+        security={config.security}
+        studentToken={config.studentToken}
+        active={!finished}
+        onTerminate={terminateCheat}
+      />
       <div className="mx-auto max-w-2xl px-4 py-8">
         {messages.length > 0 && (
           <div

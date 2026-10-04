@@ -20,6 +20,7 @@ export type Database = {
           assessment_id: string
           attempt_count: number
           blocked: boolean
+          cheat_terminated: boolean
           completed: boolean
           course_id: string | null
           created_at: string
@@ -27,12 +28,14 @@ export type Database = {
           device_id: string | null
           id: string
           key_code: string
+          tab_switch_count: number
         }
         Insert: {
           answers?: Json
           assessment_id: string
           attempt_count?: number
           blocked?: boolean
+          cheat_terminated?: boolean
           completed?: boolean
           course_id?: string | null
           created_at?: string
@@ -40,12 +43,14 @@ export type Database = {
           device_id?: string | null
           id?: string
           key_code: string
+          tab_switch_count?: number
         }
         Update: {
           answers?: Json
           assessment_id?: string
           attempt_count?: number
           blocked?: boolean
+          cheat_terminated?: boolean
           completed?: boolean
           course_id?: string | null
           created_at?: string
@@ -53,6 +58,7 @@ export type Database = {
           device_id?: string | null
           id?: string
           key_code?: string
+          tab_switch_count?: number
         }
         Relationships: [
           {
@@ -119,13 +125,18 @@ export type Database = {
       assessments: {
         Row: {
           allow_range: boolean
+          block_copy: boolean
           course_id: string | null
           created_at: string
           description: string | null
+          enable_anti_cheat: boolean
+          enable_dark_mode: boolean
+          enable_fullscreen: boolean
           id: string
           is_open: boolean
           login_mode: string
           max_attempts: number
+          max_tab_switches: number
           name: string
           order_mode: string
           question_count: number
@@ -137,13 +148,18 @@ export type Database = {
         }
         Insert: {
           allow_range?: boolean
+          block_copy?: boolean
           course_id?: string | null
           created_at?: string
           description?: string | null
+          enable_anti_cheat?: boolean
+          enable_dark_mode?: boolean
+          enable_fullscreen?: boolean
           id?: string
           is_open?: boolean
           login_mode?: string
           max_attempts?: number
+          max_tab_switches?: number
           name: string
           order_mode?: string
           question_count?: number
@@ -155,13 +171,18 @@ export type Database = {
         }
         Update: {
           allow_range?: boolean
+          block_copy?: boolean
           course_id?: string | null
           created_at?: string
           description?: string | null
+          enable_anti_cheat?: boolean
+          enable_dark_mode?: boolean
+          enable_fullscreen?: boolean
           id?: string
           is_open?: boolean
           login_mode?: string
           max_attempts?: number
+          max_tab_switches?: number
           name?: string
           order_mode?: string
           question_count?: number
@@ -268,6 +289,7 @@ export type Database = {
           assessment_id: string
           attempt_count: number
           blocked: boolean
+          cheat_terminated: boolean
           completed: boolean
           course_id: string | null
           created_at: string
@@ -275,6 +297,7 @@ export type Database = {
           device_id: string | null
           id: string
           seat_number: number
+          tab_switch_count: number
           updated_at: string
         }
         Insert: {
@@ -283,6 +306,7 @@ export type Database = {
           assessment_id: string
           attempt_count?: number
           blocked?: boolean
+          cheat_terminated?: boolean
           completed?: boolean
           course_id?: string | null
           created_at?: string
@@ -290,6 +314,7 @@ export type Database = {
           device_id?: string | null
           id?: string
           seat_number: number
+          tab_switch_count?: number
           updated_at?: string
         }
         Update: {
@@ -298,6 +323,7 @@ export type Database = {
           assessment_id?: string
           attempt_count?: number
           blocked?: boolean
+          cheat_terminated?: boolean
           completed?: boolean
           course_id?: string | null
           created_at?: string
@@ -305,6 +331,7 @@ export type Database = {
           device_id?: string | null
           id?: string
           seat_number?: number
+          tab_switch_count?: number
           updated_at?: string
         }
         Relationships: [
