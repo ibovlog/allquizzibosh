@@ -345,7 +345,7 @@ export const getAdminData = createServerFn({ method: "POST" })
         supabaseAdmin.from("courses").select("id, name, slug, logo_url, primary_color, login_title, login_subtitle").eq("id", courseId).maybeSingle(),
         supabaseAdmin
           .from("assessments")
-          .select("id, name, description, question_count, order_mode, is_open, login_mode, seat_min, seat_max, resume_after_unblock, shuffle_options, max_attempts, allow_range, created_at")
+          .select("id, name, description, question_count, order_mode, is_open, login_mode, seat_min, seat_max, resume_after_unblock, shuffle_options, max_attempts, allow_range, enable_dark_mode, enable_anti_cheat, max_tab_switches, enable_fullscreen, block_copy, created_at")
           .eq("course_id", courseId)
           .order("created_at", { ascending: false }),
         supabaseAdmin
@@ -360,12 +360,12 @@ export const getAdminData = createServerFn({ method: "POST" })
           .order("position", { ascending: true }),
         supabaseAdmin
           .from("participants")
-          .select("id, assessment_id, seat_number, access_key, device_id, blocked, completed, attempt_count, created_at")
+          .select("id, assessment_id, seat_number, access_key, device_id, blocked, completed, attempt_count, tab_switch_count, cheat_terminated, created_at")
           .eq("course_id", courseId)
           .order("seat_number", { ascending: true }),
         supabaseAdmin
           .from("access_keys")
-          .select("id, assessment_id, key_code, device_id, blocked, completed, attempt_count, created_at")
+          .select("id, assessment_id, key_code, device_id, blocked, completed, attempt_count, tab_switch_count, cheat_terminated, created_at")
           .eq("course_id", courseId)
           .order("created_at", { ascending: true }),
         supabaseAdmin
@@ -490,6 +490,11 @@ export const updateAssessment = createServerFn({ method: "POST" })
         shuffle_options: z.boolean().optional(),
         max_attempts: z.number().int().min(0).max(100).optional(),
         allow_range: z.boolean().optional(),
+        enable_dark_mode: z.boolean().optional(),
+        enable_anti_cheat: z.boolean().optional(),
+        max_tab_switches: z.number().int().min(1).max(50).optional(),
+        enable_fullscreen: z.boolean().optional(),
+        block_copy: z.boolean().optional(),
       })
       .parse(input),
   )
@@ -509,6 +514,9 @@ export const updateAssessment = createServerFn({ method: "POST" })
     if (data.shuffle_options !== undefined) patch.shuffle_options = data.shuffle_options;
     if (data.max_attempts !== undefined) patch.max_attempts = data.max_attempts;
     if (data.allow_range !== undefined) patch.allow_range = data.allow_range;
+    for (const k of ["enable_dark_mode", "enable_anti_cheat", "max_tab_switches", "enable_fullscreen", "block_copy"] as const) {
+      if (data[k] !== undefined) patch[k] = data[k];
+    }
     const { error } = await supabaseAdmin.from("assessments").update(patch as never).eq("id", data.id).eq("course_id", courseId);
     if (error) throw new Error(error.message);
     return { ok: true };
@@ -650,6 +658,7 @@ export const setParticipantBlocked = createServerFn({ method: "POST" })
     const { requireCourse } = await import("@/lib/tenant.server");
     const { courseId, supabaseAdmin } = await requireCourse(data.token);
     const patch: Record<string, unknown> = { blocked: data.blocked };
+    if (!data.blocked) { patch.tab_switch_count = 0; patch.cheat_terminated = false; }
     if (!data.blocked && data.resume === false) {
       patch.current_index = 0;
       patch.answers = {};
@@ -666,7 +675,7 @@ export const resetParticipant = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { requireCourse } = await import("@/lib/tenant.server");
     const { courseId, supabaseAdmin } = await requireCourse(data.token);
-    const patch: Record<string, unknown> = { device_id: null, blocked: false, current_index: 0, answers: {} };
+    const patch: Record<string, unknown> = { device_id: null, blocked: false, current_index: 0, answers: {}, tab_switch_count: 0, cheat_terminated: false };
     if (data.new_seat !== undefined) patch.seat_number = data.new_seat;
     const { error } = await supabaseAdmin.from("participants").update(patch as never).eq("id", data.id).eq("course_id", courseId);
     if (error) {
@@ -736,6 +745,7 @@ export const setAccessKeyBlocked = createServerFn({ method: "POST" })
     const { requireCourse } = await import("@/lib/tenant.server");
     const { courseId, supabaseAdmin } = await requireCourse(data.token);
     const patch: Record<string, unknown> = { blocked: data.blocked };
+    if (!data.blocked) { patch.tab_switch_count = 0; patch.cheat_terminated = false; }
     if (!data.blocked && data.resume === false) {
       patch.current_index = 0;
       patch.answers = {};
@@ -752,7 +762,7 @@ export const resetAccessKey = createServerFn({ method: "POST" })
     const { courseId, supabaseAdmin } = await requireCourse(data.token);
     const { error } = await supabaseAdmin
       .from("access_keys")
-      .update({ device_id: null, blocked: false, current_index: 0, answers: {} })
+      .update({ device_id: null, blocked: false, current_index: 0, answers: {}, tab_switch_count: 0, cheat_terminated: false } as never)
       .eq("id", data.id)
       .eq("course_id", courseId);
     if (error) throw new Error(error.message);
@@ -830,7 +840,7 @@ export const joinQuiz = createServerFn({ method: "POST" })
 
     let aq = supabaseAdmin
       .from("assessments")
-      .select("id, course_id, name, question_count, order_mode, is_open, login_mode, seat_min, seat_max, shuffle_options, max_attempts, allow_range")
+      .select("id, course_id, name, question_count, order_mode, is_open, login_mode, seat_min, seat_max, shuffle_options, max_attempts, allow_range, enable_dark_mode, enable_anti_cheat, max_tab_switches, enable_fullscreen, block_copy")
       .ilike("name", data.assessment_name);
     if (courseFilterId) aq = aq.eq("course_id", courseFilterId);
     const { data: assessment } = await aq.maybeSingle();
@@ -998,6 +1008,11 @@ export const joinQuiz = createServerFn({ method: "POST" })
         shuffle_options: shuffleOptions,
         max_attempts: maxAttempts,
         allow_range: (assessment as { allow_range?: boolean }).allow_range ?? true,
+        enable_dark_mode: Boolean((assessment as { enable_dark_mode?: boolean }).enable_dark_mode),
+        enable_anti_cheat: Boolean((assessment as { enable_anti_cheat?: boolean }).enable_anti_cheat),
+        max_tab_switches: (assessment as { max_tab_switches?: number }).max_tab_switches ?? 3,
+        enable_fullscreen: Boolean((assessment as { enable_fullscreen?: boolean }).enable_fullscreen),
+        block_copy: Boolean((assessment as { block_copy?: boolean }).block_copy),
       },
       participantId,
       accessKeyId,
@@ -1069,6 +1084,33 @@ export const checkBlocked = createServerFn({ method: "POST" })
       if (k?.blocked) blocked = true;
     }
     return { blocked };
+  });
+
+export const recordTabSwitch = createServerFn({ method: "POST" })
+  .inputValidator((input: unknown) =>
+    z.object({ student_token: tok }).parse(input),
+  )
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const s = await assertStudent(data.student_token);
+    const { data: a } = await supabaseAdmin
+      .from("assessments")
+      .select("enable_anti_cheat, max_tab_switches")
+      .eq("id", s.assessmentId)
+      .maybeSingle();
+    if (!a?.enable_anti_cheat) return { count: 0, max: 0, terminated: false };
+    const max = a.max_tab_switches ?? 3;
+    let count = 0;
+    for (const [table, id] of [["participants", s.participantId], ["access_keys", s.accessKeyId]] as const) {
+      if (!id) continue;
+      const { data: row } = await supabaseAdmin.from(table).select("tab_switch_count").eq("id", id).maybeSingle();
+      const next = ((row as { tab_switch_count?: number } | null)?.tab_switch_count ?? 0) + 1;
+      count = Math.max(count, next);
+      const patch: Record<string, unknown> = { tab_switch_count: next };
+      if (next >= max) { patch.blocked = true; patch.cheat_terminated = true; }
+      await supabaseAdmin.from(table).update(patch as never).eq("id", id);
+    }
+    return { count, max, terminated: count >= max };
   });
 
 // ===========================================================================
