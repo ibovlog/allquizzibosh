@@ -36,6 +36,7 @@ type Assessment = {
   order_mode: string; is_open: boolean; login_mode: "seat" | "key" | "both";
   seat_min: number; seat_max: number; resume_after_unblock: boolean;
   shuffle_options: boolean; max_attempts: number; allow_range: boolean; created_at: string;
+  enable_dark_mode: boolean; enable_anti_cheat: boolean; max_tab_switches: number; enable_fullscreen: boolean; block_copy: boolean;
 };
 type AdminResult = {
   id: string; assessment_id: string | null; seat_number: number; score: number;
@@ -49,10 +50,12 @@ type AdminQuestion = {
 type Participant = {
   id: string; assessment_id: string; seat_number: number; access_key: string | null;
   device_id: string | null; blocked: boolean; completed: boolean; attempt_count: number; created_at: string;
+  tab_switch_count?: number; cheat_terminated?: boolean;
 };
 type AccessKey = {
   id: string; assessment_id: string; key_code: string; device_id: string | null;
   blocked: boolean; completed: boolean; attempt_count: number; created_at: string;
+  tab_switch_count?: number; cheat_terminated?: boolean;
 };
 type ProcessingError = {
   id: string; assessment_id: string | null; file_name: string | null;
@@ -568,7 +571,7 @@ function AdminPage() {
 
 function AssessmentRow({ a, qCount, onSave, onToggle, onDelete }: {
   a: Assessment; qCount: number;
-  onSave: (patch: Partial<Pick<Assessment, "question_count" | "order_mode" | "login_mode" | "seat_min" | "seat_max" | "resume_after_unblock" | "shuffle_options" | "max_attempts" | "allow_range">>) => void;
+  onSave: (patch: Partial<Pick<Assessment, "question_count" | "order_mode" | "login_mode" | "seat_min" | "seat_max" | "resume_after_unblock" | "shuffle_options" | "max_attempts" | "allow_range" | "enable_dark_mode" | "enable_anti_cheat" | "max_tab_switches" | "enable_fullscreen" | "block_copy">>) => void;
   onToggle: () => void; onDelete: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -580,6 +583,11 @@ function AssessmentRow({ a, qCount, onSave, onToggle, onDelete }: {
   const [shuffleOpt, setShuffleOpt] = useState(a.shuffle_options);
   const [maxAtt, setMaxAtt] = useState(String(a.max_attempts));
   const [allowRange, setAllowRange] = useState(a.allow_range);
+  const [dark, setDark] = useState(a.enable_dark_mode);
+  const [anti, setAnti] = useState(a.enable_anti_cheat);
+  const [maxTab, setMaxTab] = useState(String(a.max_tab_switches ?? 3));
+  const [fs, setFs] = useState(a.enable_fullscreen);
+  const [noCopy, setNoCopy] = useState(a.block_copy);
   return (
     <div className="rounded-2xl border border-border bg-card p-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -625,7 +633,32 @@ function AssessmentRow({ a, qCount, onSave, onToggle, onDelete }: {
             <input type="checkbox" checked={resume} onChange={(e) => setResume(e.target.checked)} className="h-4 w-4" />
             Blokdan çıxarılan istifadəçi standart olaraq qaldığı yerdən davam etsin
           </label>
-          <Button onClick={() => onSave({ question_count: parseInt(count, 10) || a.question_count, login_mode: login, seat_min: parseInt(smin, 10) || 1, seat_max: parseInt(smax, 10) || 100, resume_after_unblock: resume, shuffle_options: shuffleOpt, max_attempts: parseInt(maxAtt, 10) || 0, allow_range: allowRange })}
+          <div className="space-y-2 rounded-xl border border-border p-3 sm:col-span-2">
+            <p className="text-sm font-semibold text-foreground">Təhlükəsizlik və görünüş</p>
+            <label className="flex items-center gap-2 text-sm text-foreground">
+              <input type="checkbox" checked={dark} onChange={(e) => setDark(e.target.checked)} className="h-4 w-4" />
+              Qaranlıq rejim keçidi (tələbə gecə rejimini aça bilsin)
+            </label>
+            <label className="flex items-center gap-2 text-sm text-foreground">
+              <input type="checkbox" checked={anti} onChange={(e) => setAnti(e.target.checked)} className="h-4 w-4" />
+              Tab / pəncərə dəyişmə nəzarəti
+            </label>
+            {anti && (
+              <div className="flex items-center gap-2 pl-6 text-sm text-foreground">
+                <span>İcazə verilən maksimum xəbərdarlıq:</span>
+                <Input type="number" min={1} max={50} value={maxTab} onChange={(e) => setMaxTab(e.target.value)} className="h-9 w-20 rounded-lg" />
+              </div>
+            )}
+            <label className="flex items-center gap-2 text-sm text-foreground">
+              <input type="checkbox" checked={fs} onChange={(e) => setFs(e.target.checked)} className="h-4 w-4" />
+              Məcburi tam ekran rejimi
+            </label>
+            <label className="flex items-center gap-2 text-sm text-foreground">
+              <input type="checkbox" checked={noCopy} onChange={(e) => setNoCopy(e.target.checked)} className="h-4 w-4" />
+              Kopyalama, sağ klik və ekran görüntüsünü blokla
+            </label>
+          </div>
+          <Button onClick={() => onSave({ question_count: parseInt(count, 10) || a.question_count, login_mode: login, seat_min: parseInt(smin, 10) || 1, seat_max: parseInt(smax, 10) || 100, resume_after_unblock: resume, shuffle_options: shuffleOpt, max_attempts: parseInt(maxAtt, 10) || 0, allow_range: allowRange, enable_dark_mode: dark, enable_anti_cheat: anti, max_tab_switches: Math.max(1, parseInt(maxTab, 10) || 3), enable_fullscreen: fs, block_copy: noCopy })}
             className="h-10 rounded-lg sm:col-span-2">Saxla</Button>
         </div>
       )}
@@ -852,6 +885,11 @@ function ParticipantRow({ p, onBlock, onUnblock, onReset, onDelete }: {
             {` · ${p.attempt_count} cəhd`}
             {p.completed ? " · Tamamlandı" : ""}
           </p>
+          {p.cheat_terminated ? (
+            <p className="text-xs font-semibold text-destructive">⛔ Xaric edildi (qaydalar pozuldu) · {p.tab_switch_count} dəfə tab dəyişdi</p>
+          ) : (p.tab_switch_count ?? 0) > 0 ? (
+            <p className="text-xs font-semibold text-destructive">⚠️ {p.tab_switch_count} dəfə tab dəyişdi</p>
+          ) : null}
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-2">
